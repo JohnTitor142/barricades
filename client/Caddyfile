@@ -1,0 +1,19 @@
+# DOMAIN=jeu.mondomaine.fr -> HTTPS automatique (Let's Encrypt)
+# DOMAIN=:80               -> HTTP seul (test rapide par IP)
+{$DOMAIN:localhost} {
+	encode zstd gzip
+
+	handle /ws {
+		reverse_proxy server:8000
+	}
+
+	handle /health {
+		reverse_proxy server:8000
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

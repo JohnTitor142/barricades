@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Barricade</title>
+</head>
+<body>
+  <div id="game"></div>
+
+  <section id="hud" hidden>
+    <div id="timer">5:00</div>
+    <div id="counts"><span id="c-humans">0</span> humains · <span id="c-zombies">0</span> zombies</div>
+    <div id="banner"></div>
+    <div id="bottom">
+      <div id="role"></div>
+      <div id="ammo"></div>
+    </div>
+    <div id="hint">Clic : tirer (humain) ou frapper (zombie) — Espace ou clic droit : frapper — ZQSD : se déplacer — M : musique</div>
+    <button id="music" type="button" aria-pressed="true" title="Musique (M)">♪ Musique</button>
+  </section>
+  <div id="feed" aria-live="polite"></div>
+
+  <main id="menu">
+    <form id="menu-form">
+      <h1>BARRICADE</h1>
+      <p class="lead">Un zombie parmi vous. Tenez jusqu'à la fin du chrono : renversez les meubles, bloquez les portes, et gardez une balle pour ralentir celui qui arrive.</p>
+      <label for="name">Votre nom</label>
+      <input id="name" maxlength="16" autocomplete="off" placeholder="Survivant" />
+      <button type="submit" id="play">Entrer dans le salon</button>
+      <p id="error" role="alert"></p>
+      <dl class="help">
+        <dt>ZQSD / flèches</dt><dd>se déplacer</dd>
+        <dt>Souris</dt><dd>viser</dd>
+        <dt>Clic gauche</dt><dd>tirer (humain) · frapper (zombie)</dd>
+        <dt>Espace / clic droit</dt><dd>frapper : fait glisser les meubles</dd>
+        <dt>M</dt><dd>couper / remettre la musique</dd>
+      </dl>
+    </form>
+  </main>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

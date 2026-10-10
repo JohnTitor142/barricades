@@ -1,0 +1,78 @@
+:root {
+  --night: #080a09;
+  --panel: rgba(8, 10, 9, .72);
+  --bone: #d8cdb4;
+  --blood: #c0262f;
+  --rot: #8fb866;
+  --line: #3a2a26;
+  --display: Impact, Haettenschweiler, "Arial Narrow Bold", "Franklin Gothic Medium", sans-serif;
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--night); color: var(--bone); }
+#game, #game canvas { position: fixed; inset: 0; touch-action: none; }
+
+#menu {
+  position: fixed; inset: 0; display: grid; place-items: center; padding: 16px;
+  background: radial-gradient(ellipse at 50% 35%, rgba(60, 12, 14, .45), rgba(8, 10, 9, .93) 70%);
+}
+#menu[hidden], #hud[hidden] { display: none; }
+#menu-form { width: min(440px, 100%); display: flex; flex-direction: column; gap: 10px; }
+h1 {
+  margin: 0; font: 400 clamp(48px, 12vw, 84px)/0.95 var(--display); letter-spacing: .03em;
+  color: var(--blood); text-shadow: 0 3px 0 #3a0a0d, 0 0 28px rgba(192, 38, 47, .35);
+}
+.lead { margin: 0 0 10px; line-height: 1.55; color: #b9ae96; }
+label { font-size: 14px; color: #9a9079; }
+input {
+  font: inherit; font-size: 18px; padding: 12px 14px; color: var(--bone);
+  background: #14100f; border: 2px solid var(--line); border-radius: 4px;
+}
+input:focus-visible, button:focus-visible { outline: 3px solid var(--rot); outline-offset: 2px; }
+#play {
+  font: 400 22px var(--display); letter-spacing: .05em; padding: 12px 18px; cursor: pointer;
+  color: #fff; background: var(--blood); border: 0; border-radius: 4px;
+}
+#play:hover { background: #d62f39; }
+#play:disabled { opacity: .6; cursor: wait; }
+#error { min-height: 1.4em; margin: 0; color: #ff8a8a; }
+.help { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 6px 0 0; font-size: 14px; color: #9a9079; }
+.help dt { color: var(--bone); }
+.help dd { margin: 0; }
+
+#hud { position: fixed; inset: 0; pointer-events: none; text-shadow: 0 1px 4px #000; }
+#timer {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+  font: 400 52px/1 var(--display); letter-spacing: .04em; font-variant-numeric: tabular-nums;
+  padding: 4px 20px; background: var(--panel); border-bottom: 3px solid var(--blood);
+}
+#timer.urgent { color: #ff6b6b; }
+#counts { position: absolute; top: 12px; left: 14px; padding: 8px 12px; background: var(--panel); font-size: 15px; }
+#counts span { font-weight: 700; font-variant-numeric: tabular-nums; }
+#banner {
+  position: absolute; top: 24%; left: 50%; transform: translateX(-50%); width: min(90vw, 760px);
+  text-align: center; font: 400 clamp(26px, 4.5vw, 46px)/1.15 var(--display); letter-spacing: .03em;
+}
+#banner.win-humans { color: var(--rot); }
+#banner.win-zombies { color: var(--blood); }
+#bottom { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px; align-items: center; }
+#role, #ammo { padding: 8px 16px; background: var(--panel); font: 400 22px var(--display); letter-spacing: .06em; }
+#role.human { border-bottom: 3px solid var(--bone); }
+#role.zombie { color: var(--rot); border-bottom: 3px solid var(--rot); }
+#ammo { letter-spacing: .15em; }
+#ammo:empty { display: none; }
+#music {
+  position: absolute; right: 14px; bottom: 14px; pointer-events: auto; cursor: pointer;
+  padding: 8px 14px; font: inherit; font-size: 14px; font-weight: 600; color: var(--bone);
+  background: var(--panel); border: 0; border-bottom: 3px solid var(--rot);
+}
+#music.off { color: #7d735f; border-bottom-color: var(--line); text-decoration: line-through; }
+#hint { position: absolute; left: 14px; bottom: 14px; max-width: 280px; font-size: 12px; color: #8b816c; line-height: 1.4; }
+
+#feed { position: fixed; right: 14px; top: 12px; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; pointer-events: none; max-width: 40vw; }
+#feed div { padding: 6px 12px; background: var(--panel); border-right: 3px solid var(--line); font-size: 14px; animation: slide .2s ease-out; }
+#feed .infect { border-right-color: var(--blood); }
+#feed .zero { border-right-color: var(--rot); }
+@keyframes slide { from { transform: translateX(20px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { #feed div { animation: none; } }
+@media (max-width: 700px) { #hint { display: none; } #counts { top: 70px; } #music { bottom: 70px; } }

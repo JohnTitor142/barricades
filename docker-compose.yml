@@ -1,0 +1,29 @@
+services:
+  server:
+    build: ./server
+    restart: unless-stopped
+    environment:
+      ROUND_SECONDS: ${ROUND_SECONDS:-300}
+      FREEZE_SECONDS: ${FREEZE_SECONDS:-10}
+      FILL_TO: ${FILL_TO:-0}
+    expose:
+      - "8000"
+
+  caddy:
+    build: ./client          # construit le client Vite puis le sert avec Caddy
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:-:80}
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
