@@ -50,8 +50,8 @@ Mesures sur la machine de développement : 24 joueurs + 83 meubles ≈ 0,7 ms de
 Le proxy de Coolify (Traefik) occupe déjà 80/443 : on utilise `docker-compose.coolify.yml`, qui n'expose aucun port.
 1. Coolify → projet → **+ New** → **Public Repository** → `https://github.com/JohnTitor142/barricades`, branche `main`.
 2. Build Pack **Docker Compose**, Docker Compose Location `/docker-compose.coolify.yml`.
-3. Domaine du service `caddy` : généré automatiquement (ou `https://barricade.mondomaine.fr`, après un
-   enregistrement DNS A vers l'IP du VPS). Variables réglables dans l'onglet Environment : `FILL_TO`, `ROUND_SECONDS`…
+3. Champ **Domains for caddy** : `https://barricade.212.227.181.202.sslip.io` (ou `https://barricade.mondomaine.fr`
+   après un enregistrement DNS A vers l'IP du VPS), puis **Save** — sans Save + redéploiement, Traefik ne route rien (503). Variables réglables dans l'onglet Environment : `FILL_TO`, `ROUND_SECONDS`…
 4. **Deploy**. Vérification : `https://<domaine>/health`.
 
 ## Déploiement sur un VPS vierge (Ubuntu 24.04)

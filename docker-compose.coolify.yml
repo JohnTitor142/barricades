@@ -1,6 +1,7 @@
 # Variante pour un VPS géré par Coolify : c'est le proxy de Coolify (Traefik) qui tient les ports
 # 80/443 et fournit le HTTPS. On n'expose donc aucun port : Traefik route vers « caddy:80 ».
-# Dans Coolify : ressource « Docker Compose », fichier /docker-compose.coolify.yml.
+# Dans Coolify : ressource « Docker Compose », fichier /docker-compose.coolify.yml, puis saisir le domaine
+# du service « caddy » dans l'onglet Configuration (champ « Domains for caddy »), Save, et (re)Deploy.
 # (docker-compose.yml reste la version autonome, avec Caddy sur 80/443, pour un VPS vierge.)
 services:
   server:
@@ -25,7 +26,6 @@ services:
       - server
     environment:
       DOMAIN: ":80"
-      SERVICE_FQDN_CADDY_80: ""      # demande à Coolify de générer une adresse pour ce service (port 80)
     expose:
       - "80"
     healthcheck:
