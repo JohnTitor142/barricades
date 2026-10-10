@@ -1,0 +1,35 @@
+# Variante pour un VPS géré par Coolify : c'est le proxy de Coolify (Traefik) qui tient les ports
+# 80/443 et fournit le HTTPS. On n'expose donc aucun port : Traefik route vers « caddy:80 ».
+# Dans Coolify : ressource « Docker Compose », fichier /docker-compose.coolify.yml.
+# (docker-compose.yml reste la version autonome, avec Caddy sur 80/443, pour un VPS vierge.)
+services:
+  server:
+    build: ./server
+    restart: unless-stopped
+    environment:
+      ROUND_SECONDS: ${ROUND_SECONDS:-300}
+      FREEZE_SECONDS: ${FREEZE_SECONDS:-10}
+      FILL_TO: ${FILL_TO:-8}          # bots pour qu'on puisse tester seul la démo
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  caddy:
+    build: ./client          # construit le client Vite puis le sert avec Caddy (HTTP seul derrière Traefik)
+    restart: unless-stopped
+    depends_on:
+      - server
+    environment:
+      DOMAIN: ":80"
+      SERVICE_FQDN_CADDY_80: ""      # demande à Coolify de générer une adresse pour ce service (port 80)
+    expose:
+      - "80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:80/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3

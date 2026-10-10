@@ -46,7 +46,15 @@ cd ../client && npm test                    # interpolation réseau du client
 Mesures sur la machine de développement : 24 joueurs + 83 meubles ≈ 0,7 ms de simulation par tick (budget 33 ms),
 ~35 Ko/s par client, ~11 % d'un cœur avec 24 clients réseau.
 
-## Déploiement VPS (Ubuntu 24.04)
+## Déploiement sur un VPS géré par Coolify (cas actuel)
+Le proxy de Coolify (Traefik) occupe déjà 80/443 : on utilise `docker-compose.coolify.yml`, qui n'expose aucun port.
+1. Coolify → projet → **+ New** → **Public Repository** → `https://github.com/JohnTitor142/barricades`, branche `main`.
+2. Build Pack **Docker Compose**, Docker Compose Location `/docker-compose.coolify.yml`.
+3. Domaine du service `caddy` : généré automatiquement (ou `https://barricade.mondomaine.fr`, après un
+   enregistrement DNS A vers l'IP du VPS). Variables réglables dans l'onglet Environment : `FILL_TO`, `ROUND_SECONDS`…
+4. **Deploy**. Vérification : `https://<domaine>/health`.
+
+## Déploiement sur un VPS vierge (Ubuntu 24.04)
 Identique au projet précédent : installer Docker (dépôt officiel), `ufw allow 80,443`, puis
 ```bash
 cp .env.example .env        # DOMAIN=jeu.mondomaine.fr (ou DOMAIN=:80 pour un test par IP)
