@@ -15,6 +15,13 @@ export const PROP_STYLE = {
   wardrobe: [0x2a1f19, 0x44342b],
   fridge: [0x9da29c, 0xc9cec6],
   piano: [0x0b0b0d, 0x1d1d22],
+  stove: [0x2a2a2e, 0x3d3d42],
+  counter: [0x5a5a58, 0x8a8780],
+  bathtub: [0x9da29c, 0xd8dcd4],
+  hay_bale: [0x8a7230, 0xb39a45],
+  pew: [0x4a3220, 0x6a4a2e],
+  dumpster: [0x1e3a24, 0x2c5434],
+  car: [0x1a1a1e, 0x5a1e1e],
 };
 const DEFAULT_STYLE = [0x4a4a4a, 0x6a6a6a];
 export const styleOf = (kind) => PROP_STYLE[kind] ?? DEFAULT_STYLE;
@@ -147,6 +154,39 @@ function details(g, kind, parts, ox, oy) {
     const [, w, h] = p0;
     g.fillStyle(0x6d726c, 1);
     g.fillRect(ox + w / 2 - 12, oy - h / 2 + 10, 4, h / 2 - 6);
+  } else if (kind === 'stove') {
+    const [, w] = p0;                              // quatre feux
+    g.lineStyle(2, 0x111114, 1);
+    for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) g.strokeCircle(ox + sx * w / 4, oy + sy * w / 4, w / 7);
+  } else if (kind === 'counter') {
+    const [, w, h] = p0;                           // évier
+    g.fillStyle(0x3a4a55, 1);
+    g.fillRect(ox + w / 4 - 14, oy - h / 2 + 8, 28, h - 16);
+  } else if (kind === 'bathtub') {
+    const [, w, h] = p0;
+    g.fillStyle(0x7a8a95, 1);
+    g.fillRoundedRect(ox - w / 2 + 10, oy - h / 2 + 12, w - 20, h - 24, 18);
+  } else if (kind === 'hay_bale') {
+    const [, w, h] = p0;                           // liens de la botte
+    g.lineStyle(2, 0x6a5420, 1);
+    g.lineBetween(ox - w / 4, oy - h / 2 + 3, ox - w / 4, oy + h / 2 - 3);
+    g.lineBetween(ox + w / 4, oy - h / 2 + 3, ox + w / 4, oy + h / 2 - 3);
+  } else if (kind === 'pew') {
+    const [, w, h] = p0;                           // dossier
+    g.fillStyle(side, 1);
+    g.fillRect(ox - w / 2 + 3, oy - h / 2 + 3, w - 6, 9);
+  } else if (kind === 'dumpster') {
+    const [, w] = p0;                              // couvercle en deux battants
+    g.fillStyle(0x0f2214, 1);
+    g.fillRect(ox - 1.5, oy - 30, 3, 60);
+    g.fillRect(ox - w / 2 + 6, oy - 2, w - 12, 4);
+  } else if (kind === 'car') {
+    const [, w, h] = p0;                           // pare-brise, lunette arrière, toit
+    g.fillStyle(0x1b2633, 1);
+    g.fillRect(ox + w * 0.12, oy - h / 2 + 8, w * 0.16, h - 16);
+    g.fillRect(ox - w * 0.32, oy - h / 2 + 10, w * 0.12, h - 20);
+    g.fillStyle(0x6e2626, 1);
+    g.fillRect(ox - w * 0.18, oy - h / 2 + 10, w * 0.28, h - 20);
   } else if (kind === 'piano') {
     const [, w, h, dx, dy] = p0;                   // clavier : bande blanche + touches noires côté avant
     const x0 = ox + dx - w / 2 + 6;

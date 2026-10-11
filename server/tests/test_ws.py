@@ -39,7 +39,8 @@ def test_welcome_contains_map_and_state_follows():
         assert w["t"] == "welcome" and len(w["walls"]) >= 10 and len(w["props"]) >= 70
         assert len(w["pos"]) == len(w["props"]) and w["names"][str(w["id"])] == "Alice"
         assert len(w["ps"]) == len(w["props"]) and all(pct == 100 for _, pct in w["ps"])
-        assert w["map"] and len(w["rooms"]) >= 6 and w["v"] == PROTOCOL_VERSION
+        assert w["map"] and len(w["areas"]) >= 6 and w["v"] == PROTOCOL_VERSION
+        assert all(len(wl) == 6 for wl in w["walls"])          # x1, y1, x2, y2, épaisseur, style
         s = recv_until(ws, lambda m: m["t"] == "s")
         assert s["ph"] == "wait" and "me" in s and any(p[0] == w["id"] for p in s["p"])
 

@@ -28,7 +28,7 @@ def settings_from_env() -> Settings:
         min_players=int(env("MIN_PLAYERS", 2)),
         max_players=int(env("MAX_PLAYERS", 24)),
         fill_to=int(env("FILL_TO", 0)),
-        map=env("MAP", "entrepot"),
+        map=env("MAP", "ville"),
     )
 
 

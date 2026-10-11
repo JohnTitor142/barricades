@@ -28,11 +28,11 @@ import pymunk
 import tcod.path
 from pymunk import ShapeFilter
 
-from .maps import MapDef, get_map
+from .maps import MapDef, Obstacle, Wall, get_map
 
 TICK_RATE = 30
 # À incrémenter à chaque changement du protocole : un client d'une autre version se recharge tout seul.
-PROTOCOL_VERSION = 4
+PROTOCOL_VERSION = 5
 SUBSTEPS = 2                       # pas de physique par tick (60 Hz)
 
 # --- Monde (les cartes elles-mêmes sont dans maps.py) ----------------------
@@ -132,11 +132,40 @@ PROP_KINDS: dict[str, PropKind] = {
     "piano": PropKind((("box", 140, 60, 0, -45),                                           # piano à queue :
                        ("poly", ((-70, -15), (70, -15), (45, 60), (-10, 80), (-55, 55)))),   # clavier + caisse
                       70, 50),
+    "stove": PropKind((("box", 60, 60, 0, 0),), 45, 40),
+    "counter": PropKind((("box", 120, 40, 0, 0),), 40, 40),
+    "bathtub": PropKind((("box", 80, 150, 0, 0),), 50, 40),
+    "hay_bale": PropKind((("box", 80, 45, 0, 0),), 20, 25),
+    "pew": PropKind((("box", 170, 34, 0, 0),), 35, 35),                                    # banc d'église
+    "dumpster": PropKind((("box", 120, 70, 0, 0),), 90, 50),
+    "car": PropKind((("box", 190, 86, 0, 0),), 150, 50),
 }
 ROOM_PROPS = (["chair"] * 3 + ["barrel"] * 2
               + ["crate", "table", "round_table", "bookshelf", "sofa_l", "bed", "wardrobe", "fridge", "piano"])
 ROOM_PROPS_AREA = 800 * 800        # ROOM_PROPS meuble une pièce de cette surface ; au prorata pour les autres
-DOOR_CLEARANCE = 150.0             # aucun meuble posé à moins de ça d'une porte au début d'une manche
+
+# Thèmes de mobilier (champ « theme » des zones d'une carte) : types tirés au hasard et densité
+# (meubles pour 100 000 px², soit une pièce d'environ 316 x 316). « mixed » = ancien mobilier générique.
+THEMES: dict[str, tuple[list[str], float]] = {
+    "mixed": (ROOM_PROPS, len(ROOM_PROPS) / ROOM_PROPS_AREA * 1e5),
+    "living": (["sofa_l", "round_table", "bookshelf", "chair", "chair", "piano", "table", "barrel"], 2.0),
+    "dining": (["table", "chair", "chair", "chair", "chair", "bookshelf", "wardrobe"], 2.2),
+    "bedroom": (["bed", "wardrobe", "chair", "bookshelf", "crate"], 2.0),
+    "kitchen": (["fridge", "stove", "counter", "counter", "table", "chair", "chair", "barrel"], 2.6),
+    "bathroom": (["bathtub", "crate", "wardrobe"], 2.0),
+    "library": (["bookshelf", "bookshelf", "bookshelf", "round_table", "chair", "piano"], 2.2),
+    "hall": (["chair", "bookshelf", "table", "round_table", "piano"], 0.9),
+    "office": (["table", "chair", "chair", "bookshelf", "wardrobe"], 2.0),
+    "shop": (["counter", "counter", "bookshelf", "bookshelf", "bookshelf", "crate", "fridge"], 2.2),
+    "storage": (["crate", "crate", "barrel", "barrel", "bookshelf", "wardrobe"], 2.6),
+    "garage": (["car", "crate", "barrel", "barrel", "counter"], 1.2),
+    "barn": (["hay_bale", "hay_bale", "hay_bale", "hay_bale", "crate", "crate", "barrel"], 1.6),
+    "chapel": (["pew", "pew", "pew", "pew", "table"], 1.8),
+    "farmyard": (["hay_bale", "hay_bale", "barrel", "crate"], 0.25),
+    "garden": (["round_table", "chair", "barrel"], 0.12),
+    "street": (["dumpster", "barrel", "crate"], 0.06),
+}
+DOOR_CLEARANCE = 110.0             # aucun meuble posé à moins de ça d'une porte au début d'une manche
 
 
 def clamp(v: float, lo: float, hi: float) -> float:
@@ -151,15 +180,21 @@ class NavGrid:
 
     CARDINAL, DIAGONAL = 2, 3          # coûts d'un pas droit / en diagonale (≈ 1 : 1,41)
 
-    def __init__(self, walls, w: float, h: float, cell: float = NAV_CELL, margin: float = NAV_MARGIN) -> None:
+    def __init__(self, walls: list[Wall], w: float, h: float, obstacles: list[Obstacle] = (),
+                 cell: float = NAV_CELL, margin: float = NAV_MARGIN) -> None:
         self.cell = cell
         self.cols, self.rows = int(w // cell), int(h // cell)
         cx = (np.arange(self.cols) + 0.5) * cell
         cy = (np.arange(self.rows) + 0.5) * cell
         gx, gy = np.meshgrid(cx, cy, indexing="ij")            # tableaux [colonne, ligne]
         blocked = np.zeros((self.cols, self.rows), dtype=bool)
-        for wx, wy, ww, wh in walls:
-            blocked |= (np.abs(gx - wx) < ww / 2 + margin) & (np.abs(gy - wy) < wh / 2 + margin)
+        for wl in walls:                                        # murs à n'importe quel angle
+            dx, dy = wl.x2 - wl.x1, wl.y2 - wl.y1
+            k = np.clip(((gx - wl.x1) * dx + (gy - wl.y1) * dy) / max(dx * dx + dy * dy, 1e-9), 0, 1)
+            dist = np.hypot(gx - (wl.x1 + k * dx), gy - (wl.y1 + k * dy))
+            blocked |= dist < wl.t / 2 + margin
+        for ob in obstacles:
+            blocked |= np.hypot(gx - ob.x, gy - ob.y) < ob.r + margin
         self.blocked = blocked
         self.cost = np.where(blocked, 0, 1).astype(np.int32)    # 0 = infranchissable pour tcod
 
@@ -317,35 +352,47 @@ class World:
         self.walls, self.doors = self.map.walls, self.map.doors
         self._build_static()
         self._build_props(random.Random(seed))
-        self.nav = NavGrid(self.walls, self.map.w, self.map.h)
+        self.nav = NavGrid(self.walls, self.map.w, self.map.h, self.map.obstacles)
 
     # ------------------------------------------------------------ construction
     def _build_static(self) -> None:
-        for cx, cy, w, h in self.walls:
-            shape = pymunk.Poly(self.space.static_body,
-                                [(cx - w / 2, cy - h / 2), (cx + w / 2, cy - h / 2),
-                                 (cx + w / 2, cy + h / 2), (cx - w / 2, cy + h / 2)])
+        """Murs = segments épais à bouts ronds (n'importe quel angle) ; obstacles = cercles. Fixes, indestructibles."""
+        for wl in self.walls:
+            shape = pymunk.Segment(self.space.static_body, (wl.x1, wl.y1), (wl.x2, wl.y2), wl.t / 2)
+            shape.friction = 0.8
+            shape.filter = ShapeFilter(categories=CAT_WALL)
+            self.space.add(shape)
+        for ob in self.map.obstacles:
+            shape = pymunk.Circle(self.space.static_body, ob.r, (ob.x, ob.y))
             shape.friction = 0.8
             shape.filter = ShapeFilter(categories=CAT_WALL)
             self.space.add(shape)
 
     def _build_props(self, rng: random.Random) -> None:
-        placed: list[tuple[float, float, float]] = []
-        for i, (x0, y0, x1, y1) in enumerate(self.map.rooms):
-            n = round(len(ROOM_PROPS) * (x1 - x0) * (y1 - y0) / ROOM_PROPS_AREA)
-            if i == self.map.zombie_room and self.map.name != "manoir":
+        """Meubles posés par la carte, puis mobilier tiré au hasard selon le thème de chaque zone."""
+        for fp in self.map.props:
+            self._add_prop(fp.kind, fp.x, fp.y, fp.angle)
+        for area in self.map.areas:
+            if area.theme is None:
+                continue
+            pool, density = THEMES[area.theme]
+            n = round(density * area.surface / 1e5)
+            if area.spawn == "zombie" and self.map.name != "manoir":
                 n //= 3                    # la salle des zombies n'a pas besoin d'être meublée
-            kinds = ROOM_PROPS if n >= len(ROOM_PROPS) else rng.sample(ROOM_PROPS, n)
+            if area.theme == "mixed":
+                kinds = pool if n >= len(pool) else rng.sample(pool, n)
+            else:
+                kinds = rng.choices(pool, k=n)
             for kind in kinds:
                 rad = PROP_KINDS[kind].radius
                 for _ in range(60):
-                    x = rng.uniform(x0 + 70 + rad, x1 - 70 - rad)
-                    y = rng.uniform(y0 + 70 + rad, y1 - 70 - rad)
+                    pt = area.random_point(rng, margin=rad * 0.5 + 10, tries=8)   # les murs : _free
+                    if pt is None:
+                        continue
+                    x, y = pt
                     if any(math.hypot(x - dx, y - dy) < DOOR_CLEARANCE for dx, dy in self.doors):
                         continue
-                    if any(math.hypot(x - px, y - py) < rad + pr + 8 for px, py, pr in placed):
-                        continue
-                    if not self._free(x, y, rad):          # piliers
+                    if not self._free(x, y, rad + 4):      # murs, obstacles et meubles déjà posés
                         continue
                     break
                 else:
@@ -353,7 +400,6 @@ class World:
                 angle = 0.0 if rng.random() < 0.5 else math.pi / 2
                 if rng.random() < 0.25:
                     angle = rng.uniform(0, math.pi)
-                placed.append((x, y, rad))
                 self._add_prop(kind, x, y, angle)
 
     def _add_prop(self, kind: str, x: float, y: float, angle: float) -> Prop:
@@ -439,7 +485,7 @@ class World:
                    bot=BotBrain() if bot else None, ctrl=ctrl, pivot=pivot)
         if self.phase == "play":
             self._set_role(p, ZOMBIE)
-            body.position = self._spawn_point([self.map.zombie_room])
+            body.position = self._spawn_point(self.map.zombie_areas)
         else:
             body.position = self._spawn_point(self._human_rooms())
         ctrl.position = body.position
@@ -504,15 +550,16 @@ class World:
         taken = taken or []
         x = y = 0.0
         for _ in range(80):
-            x0, y0, x1, y1 = self.map.rooms[self.rng.choice(rooms)]
-            x = self.rng.uniform(x0 + 80, x1 - 80)
-            y = self.rng.uniform(y0 + 80, y1 - 80)
+            pt = self.map.areas[self.rng.choice(rooms)].random_point(self.rng, margin=PLAYER_R + 20, tries=10)
+            if pt is None:
+                continue
+            x, y = pt
             if self._free(x, y, PLAYER_R + 8) and all(math.hypot(x - tx, y - ty) > 60 for tx, ty in taken):
                 break
         return x, y
 
     def _human_rooms(self) -> list[int]:
-        return [i for i in range(len(self.map.rooms)) if i != self.map.zombie_room]
+        return self.map.human_areas
 
     def _respawn_all_as_humans(self) -> None:
         taken: list[tuple[float, float]] = []
@@ -553,7 +600,7 @@ class World:
 
     def _promote_zero(self, p: Player, first: bool = False) -> None:
         self._set_role(p, ZOMBIE)
-        self._teleport(p, self._spawn_point([self.map.zombie_room]))
+        self._teleport(p, self._spawn_point(self.map.zombie_areas))
         if first:
             p.frozen_until = self.freeze_until = self.now + self.cfg.freeze_seconds
         self.events.append({"k": "zero", "id": p.id})
@@ -687,7 +734,7 @@ class World:
         z.respawn_until = z.frozen_until = self.now + RESPAWN_TIME
         z.slow_until = 0.0
         z.kbx = z.kby = 0.0
-        self._teleport(z, self._spawn_point([self.map.zombie_room]))
+        self._teleport(z, self._spawn_point(self.map.zombie_areas))
 
     def _damage_prop(self, pr: Prop) -> None:
         pr.hp -= 1
@@ -850,8 +897,11 @@ class World:
     def static_info(self) -> dict:
         return {
             "v": PROTOCOL_VERSION, "map": self.map.name, "w": self.map.w, "h": self.map.h,
-            "rooms": [list(r) for r in self.map.rooms],
-            "walls": [[round(v, 1) for v in w] for w in self.walls],
+            "base": self.map.base,
+            "areas": [[a.ground, [[round(x, 1), round(y, 1)] for x, y in a.poly]] for a in self.map.areas],
+            "walls": [[round(wl.x1, 1), round(wl.y1, 1), round(wl.x2, 1), round(wl.y2, 1), wl.t, wl.style]
+                      for wl in self.walls],
+            "obstacles": [[ob.kind, ob.x, ob.y, ob.r] for ob in self.map.obstacles],
             "kinds": {name: [list(part) if part[0] != "poly" else ["poly", [list(pt) for pt in part[1]]]
                              for part in k.parts] for name, k in PROP_KINDS.items()},
             "props": [[pr.id, pr.kind] for pr in self.props.values()],

@@ -19,7 +19,9 @@ jeu (tick, interpolation, autorité serveur…) quand elles apparaissent, et ava
 
 ## Architecture
 - `server/` : Python 3.12, FastAPI + WebSocket, physique **pymunk**. État en mémoire, UN seul worker.
-  - `app/maps.py` : cartes = données (murs, portes, piliers, pièces) : `entrepot` (défaut), `manoir`.
+  - `app/maps.py` + `app/map_data/*.json` : cartes = données (zones de sol/thème/apparition, murs obliques,
+    portes, obstacles, meubles fixes) ; `ville` (défaut), `entrepot`, `manoir`. Format et méthode pour créer une
+    carte à partir d'une description : `app/map_data/README.md`. Aperçu PNG : `python tools/render_map.py <nom> --nav`.
   - Navigation des bots : `tcod` (Dijkstra multi-sources + descente de pente) sur une grille générée depuis les murs.
   - `app/game.py` : toute la logique (physique, manches, infection, tir, bots, snapshots). **Aucun I/O** :
     reste pur et testable. Constantes de gameplay en tête de fichier.
@@ -56,7 +58,7 @@ npm test           :: interpolation
 npm run build
 ```
 Réglages serveur par variables d'environnement : `ROUND_SECONDS`, `FREEZE_SECONDS`, `INTERMISSION_SECONDS`,
-`MIN_PLAYERS`, `MAX_PLAYERS`, `FILL_TO` (bots pour jouer seul), `MAP` (`entrepot` | `manoir`).
+`MIN_PLAYERS`, `MAX_PLAYERS`, `FILL_TO` (bots pour jouer seul), `MAP` (`ville` | `entrepot` | `manoir` | tout fichier de `app/map_data/`).
 
 ## Règles de travail
 - Toute règle de jeu va dans `game.py` avec un test dans `tests/test_game.py`.
@@ -65,7 +67,7 @@ Réglages serveur par variables d'environnement : `ROUND_SECONDS`, `FREEZE_SECON
 - Ne mets pas de calcul de physique côté client : le client affiche, le serveur décide.
 
 ## État actuel
-- Serveur : 51 tests verts ; entrepôt, 24 joueurs ≈ 1,6 ms/tick (pire tick ~15 ms) ; ~30 Ko/s par client.
+- Serveur : 57 tests verts ; entrepôt, 24 joueurs ≈ 1,6 ms/tick (pire tick ~15 ms) ; ~30 Ko/s par client.
 - Client : rendu vérifié dans le navigateur (capture) ; sang/débris « cuits » dans une RenderTexture.
   Musique + sons synthétisés (Web Audio). En dev, `window.__barricade` = { game, net, sound }.
 - En ligne : https://barricade.212.227.181.202.sslip.io (Coolify, `docker-compose.coolify.yml`, 24 bots).

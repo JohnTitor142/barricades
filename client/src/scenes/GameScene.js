@@ -3,7 +3,21 @@ import { sound } from '../audio.js';
 import { drawKind, kindBounds, randomPointIn, styleOf } from '../furniture.js';
 import { INTERP_DELAY, net } from '../net.js';
 
-const ROOM_TINTS = [0x15120f, 0x12150f, 0x161214, 0x11131a, 0x171410, 0x131315];
+// Sols, murs et obstacles par type (les cartes viennent du serveur ; un type inconnu reste lisible).
+const GROUND = {
+  floor: 0x15120f, wood: 0x1d150e, tile: 0x16181b, carpet: 0x1b0f13, stone: 0x1a1918, straw: 0x251f10,
+  concrete: 0x161616, grass: 0x0e160b, asphalt: 0x0f0f11, sidewalk: 0x24221f, dirt: 0x211810,
+  field: 0x18200c, gravel: 0x1f1e1a, cemetery: 0x101410,
+};
+const WALL = {
+  brick: [0x6a3f33, 0x2a1712], wood: [0x5a4430, 0x22180e], stone: [0x6a6862, 0x262522],
+  concrete: [0x4a4742, 0x1a1917], fence: [0x7a6442, 0x2a2214], iron: [0x6a6a72, 0x141417],
+  hedge: [0x1f3d1b, 0x0b1609], grave: [0x7a7a80, 0x2a2a2e],
+};
+const OBSTACLE = {
+  tree: [0x173315, 0x0a1709], rock: [0x55534e, 0x22211f], well: [0x4a4a55, 0x15151a],
+  silo: [0x8a8a8a, 0x3a3a3a], pillar: [0x4a4742, 0x1a1917], pump: [0x8a1e1e, 0x2a0a0a],
+};
 const HUMAN = 0;
 const ZOMBIE_BODY = 0x7ea35c;
 const BLOODS = [0x6e0f16, 0x8b1a22, 0x540b10];
@@ -31,7 +45,7 @@ export class GameScene extends Phaser.Scene {
     this.firing = false;
 
     this.cameras.main.setBackgroundColor('#030403');
-    this.floor = this.add.graphics().setDepth(0);
+    this.floorChunks = [];
     // Le sang est « cuit » dans une texture : chaque tache est dessinée une seule fois,
     // puis la texture s'affiche d'un bloc. Le coût par image ne dépend plus du nombre de taches.
     this.blood = null;
@@ -88,21 +102,56 @@ export class GameScene extends Phaser.Scene {
     this.blood?.destroy();
     this.blood = this.add.renderTexture(0, 0, w, h).setOrigin(0).setDepth(1);
     this.shotSplats = 0;
-    const f = this.floor;
-    f.clear();
-    net.rooms.forEach(([x0, y0, x1, y1], i) => {
-      f.fillStyle(ROOM_TINTS[i % ROOM_TINTS.length], 1);
-      f.fillRect(x0, y0, x1 - x0, y1 - y0);
-    });
-    f.lineStyle(1, 0x000000, 0.35);          // lattes de parquet / carrelage
+    // Le décor (sols, murs, obstacles) ne bouge jamais : on le dessine UNE fois dans des textures découpées en
+    // tuiles (≤ 2048 px, accepté par toutes les cartes graphiques). Redessiné à chaque image, il coûtait ~18 ms.
+    const f = this.make.graphics({}, false);
+    f.fillStyle(GROUND[net.base] ?? GROUND.floor, 1);
+    f.fillRect(0, 0, w, h);
+    for (const [ground, poly] of net.areas) {
+      f.fillStyle(GROUND[ground] ?? GROUND.floor, 1);
+      f.fillPoints(poly.map(([x, y]) => ({ x, y })), true);
+    }
+    f.lineStyle(1, 0x000000, 0.3);           // trame légère (lattes, dalles, sillons)
     for (let x = 0; x <= w; x += 80) f.lineBetween(x, 0, x, h);
     for (let y = 0; y <= h; y += 80) f.lineBetween(0, y, w, y);
-    for (const [cx, cy, ww, hh] of net.walls) {
-      f.fillStyle(0x4a4742, 1);
-      f.fillRect(cx - ww / 2, cy - hh / 2, ww, hh);
-      f.lineStyle(3, 0x1a1917, 1);
-      f.strokeRect(cx - ww / 2, cy - hh / 2, ww, hh);
+    // Murs : segments épais à bouts ronds, à n'importe quel angle (contour sombre, puis couleur du style).
+    for (const pass of [1, 0]) {
+      for (const [x1, y1, x2, y2, t, style] of net.walls) {
+        const col = (WALL[style] ?? WALL.concrete)[pass];
+        const tt = t + (pass ? 4 : 0);
+        f.lineStyle(tt, col, 1);
+        f.lineBetween(x1, y1, x2, y2);
+        f.fillStyle(col, 1);
+        f.fillCircle(x1, y1, tt / 2);
+        f.fillCircle(x2, y2, tt / 2);
+      }
     }
+    for (const [kind, x, y, r] of net.obstacles) {
+      const [fill, edge] = OBSTACLE[kind] ?? OBSTACLE.rock;
+      f.fillStyle(edge, 1);
+      f.fillCircle(x, y, r + 2);
+      f.fillStyle(fill, 1);
+      f.fillCircle(x, y, r);
+      if (kind === 'tree') {                 // feuillage : quelques touffes plus claires
+        f.fillStyle(0x234a1f, 1);
+        for (let i = 0; i < 5; i++) f.fillCircle(x + Math.cos(i * 1.3) * r * 0.45, y + Math.sin(i * 1.3) * r * 0.45, r * 0.35);
+      } else if (kind === 'well' || kind === 'silo') {
+        f.lineStyle(3, edge, 1);
+        f.strokeCircle(x, y, r * 0.6);
+      }
+    }
+    for (const rt of this.floorChunks) rt.destroy();
+    this.floorChunks = [];
+    const TILE = 2048;
+    for (let x0 = 0; x0 < w; x0 += TILE) {
+      for (let y0 = 0; y0 < h; y0 += TILE) {
+        const rt = this.add.renderTexture(x0, y0, Math.min(TILE, w - x0), Math.min(TILE, h - y0));
+        rt.setOrigin(0).setDepth(0);
+        rt.draw(f, -x0, -y0);
+        this.floorChunks.push(rt);
+      }
+    }
+    f.destroy();
 
     // Une texture par type de meuble (dessinée une fois), partagée par tous les meubles de ce type.
     const brush = this.make.graphics({}, false);

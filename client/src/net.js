@@ -5,7 +5,7 @@
 // garde un court historique, et un meuble immobile reste simplement à sa dernière position.
 
 export const INTERP_DELAY = 100; // ms
-export const PROTOCOL = 4;        // doit valoir PROTOCOL_VERSION du serveur (game.py)
+export const PROTOCOL = 5;        // doit valoir PROTOCOL_VERSION du serveur (game.py)
 const TELEPORT = 250;            // au-delà, pas de lissage (réapparition, changement de manche)
 
 export function lerpAngle(a, b, k) {
@@ -63,8 +63,10 @@ export class Net {
     this.id = null;
     this.ready = false;
     this.world = { w: 2400, h: 1600 };
-    this.walls = [];
-    this.rooms = [];
+    this.walls = [];           // [x1, y1, x2, y2, épaisseur, style] : n'importe quel angle
+    this.areas = [];           // [sol, [[x, y], ...]]
+    this.obstacles = [];       // [type, x, y, rayon]
+    this.base = 'floor';
     this.kinds = {};           // type -> formes (envoyées par le serveur)
     this.propInfo = new Map(); // id -> {kind}
     this.props = new Map();    // id -> Track
@@ -117,7 +119,9 @@ export class Net {
     this.id = m.id;
     this.world = { w: m.w, h: m.h };
     this.walls = m.walls;
-    this.rooms = m.rooms ?? [];
+    this.areas = m.areas ?? [];
+    this.obstacles = m.obstacles ?? [];
+    this.base = m.base ?? 'floor';
     this.cfg = m.cfg;
     this.kinds = m.kinds ?? {};
     for (const [id, kind] of m.props) {

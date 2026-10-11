@@ -5,6 +5,7 @@ import pytest
 
 from app.game import (
     BULLET_DAMAGE,
+    CAT_WALL,
     CAT_ZOMBIE,
     FLOW_REFRESH,
     HIT_COOLDOWN,
@@ -17,10 +18,11 @@ from app.game import (
     RESPAWN_TIME,
     ZOMBIE,
     ZOMBIE_HP,
+    NavGrid,
     Settings,
     World,
 )
-from app.maps import MAPS
+from app.maps import MAPS, cut_doors
 
 DT = 1 / 30
 
@@ -79,12 +81,40 @@ def test_every_map_is_connected_and_furnished(name):
     """Depuis la salle des zombies, on atteint toutes les pièces ; aucune porte n'est bouchée au départ."""
     w = World(Settings(map=name), seed=7)
     assert len(w.props) >= 70
-    zx0, zy0, zx1, zy1 = w.map.rooms[w.map.zombie_room]
-    start = ((zx0 + zx1) / 2, (zy0 + zy1) / 2)
-    for x0, y0, x1, y1 in w.map.rooms:
-        assert w.nav.path(start, ((x0 + x1) / 2, (y0 + y1) / 2)), (x0, y0)
+    start = w.map.areas[w.map.zombie_areas[0]].inner_point()
+    for a in w.map.areas:
+        assert w.nav.path(start, a.inner_point()), a.id
     for dx, dy in w.doors:
         assert w._free(dx, dy, PLAYER_R + 4), (dx, dy)
+    assert not w.map.unused_doors, w.map.unused_doors      # chaque porte perce bien un mur
+    assert w.map.zombie_areas and w.map.human_areas
+    for i in w.map.human_areas + w.map.zombie_areas:      # on peut apparaître partout où c'est prévu
+        assert w.map.areas[i].random_point(w.rng, margin=PLAYER_R + 20), w.map.areas[i].id
+
+
+def test_doors_leave_exactly_the_requested_opening():
+    """Un mur horizontal de 400 px percé d'une porte de 110 : deux tronçons, 110 px de vide entre leurs bords."""
+    walls, unused = cut_doors([((0, 0), (400, 0), 24, "brick")], [(200, 0, 110)])
+    assert not unused and len(walls) == 2
+    a, b = sorted(walls, key=lambda wl: wl.x1)
+    assert (b.x1 - b.t / 2) - (a.x2 + a.t / 2) == 110      # bords arrondis compris
+
+
+def test_oblique_walls_block_players_and_navigation():
+    """Mur en diagonale (45°) : on ne le traverse pas, et la navigation le contourne."""
+    w = empty_world()
+    from app.maps import Wall
+    diag = Wall(600, 200, 1000, 600, 24, "stone")
+    seg = pymunk.Segment(w.space.static_body, (diag.x1, diag.y1), (diag.x2, diag.y2), diag.t / 2)
+    seg.filter = pymunk.ShapeFilter(categories=CAT_WALL)
+    w.space.add(seg)
+    nav = NavGrid([*w.walls, diag], w.map.w, w.map.h)
+    assert nav.is_blocked(nav.cell_of(800, 400))           # milieu du mur
+    p = w.add_player("A")
+    w._teleport(p, (700, 500))                            # sous la diagonale
+    w.set_input(p.id, 0.7071, -0.7071, 0)                 # fonce perpendiculairement au mur
+    run(w, 2)
+    assert p.y - (p.x - 400) > 0                          # toujours du même côté de la droite y = x - 400
 
 
 def test_unknown_map_is_refused():
@@ -337,8 +367,7 @@ def test_bullets_eventually_kill_a_zombie_who_respawns_in_his_room():
         run(w, 0.4)
         assert shots <= 2 * ZOMBIE_HP / BULLET_DAMAGE
     assert shots == math.ceil(ZOMBIE_HP / BULLET_DAMAGE)
-    x0, y0, x1, y1 = w.map.rooms[w.map.zombie_room]
-    assert x0 <= z.x <= x1 and y0 <= z.y <= y1 and z.hp == ZOMBIE_HP
+    assert any(w.map.areas[i].contains(z.x, z.y) for i in w.map.zombie_areas) and z.hp == ZOMBIE_HP
     assert w.snapshot()["p"][1][5] & 4            # drapeau « en réapparition »
 
 
@@ -571,8 +600,7 @@ def test_zombie_bot_does_not_get_stuck_on_door_frames(name, target):
     h = w.add_player("H")
     z = w.add_player("Z", bot=True)
     w._set_role(z, ZOMBIE)
-    zx0, zy0, zx1, zy1 = w.map.rooms[w.map.zombie_room]
-    w._teleport(z, ((zx0 + zx1) / 2, (zy0 + zy1) / 2))
+    w._teleport(z, w.map.areas[w.map.zombie_areas[0]].inner_point())
     w._teleport(h, target)
     h.frozen_until = 1e9
     assert chase(w, z, h, 30)

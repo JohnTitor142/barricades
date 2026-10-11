@@ -1,0 +1,160 @@
+{
+  "name": "ville",
+  "description": "Petite ville coupée par deux rues en croix. NO : ferme (champ clôturé, grange, maison de ferme, silo). NE : manoir entouré d'une haie, aile est en biais, garage. SO : cimetière clôturé (apparition des zombies) avec chapelle à abside, maison du gardien et parking. SE : épicerie, maison en L, maison à pignon biseauté.",
+  "size": [5200, 3600],
+  "base": "grass",
+
+  "areas": [
+    {"id": "rue_est_ouest", "rect": [0, 1600, 5200, 1900], "ground": "asphalt", "theme": "street"},
+    {"id": "rue_nord_sud", "rect": [2500, 0, 2800, 3600], "ground": "asphalt", "theme": "street"},
+    {"id": "trottoir_no", "rect": [0, 1540, 2500, 1600], "ground": "sidewalk"},
+    {"id": "trottoir_ne", "rect": [2800, 1540, 5200, 1600], "ground": "sidewalk"},
+    {"id": "trottoir_so", "rect": [0, 1900, 2500, 1960], "ground": "sidewalk"},
+    {"id": "trottoir_se", "rect": [2800, 1900, 5200, 1960], "ground": "sidewalk"},
+    {"id": "trottoir_ouest_n", "rect": [2440, 0, 2500, 1540], "ground": "sidewalk"},
+    {"id": "trottoir_est_n", "rect": [2800, 0, 2860, 1540], "ground": "sidewalk"},
+    {"id": "trottoir_ouest_s", "rect": [2440, 1960, 2500, 3600], "ground": "sidewalk"},
+    {"id": "trottoir_est_s", "rect": [2800, 1960, 2860, 3600], "ground": "sidewalk"},
+
+    {"id": "champ", "rect": [80, 80, 1100, 900], "ground": "field", "theme": "farmyard"},
+    {"id": "cour_ferme", "rect": [1150, 780, 2380, 1480], "ground": "dirt", "theme": "farmyard"},
+    {"id": "grange", "poly": [[1300, 200], [1800, 200], [1800, 460], [2000, 460], [2000, 750], [1300, 750]],
+     "ground": "straw", "theme": "barn", "spawn": "human"},
+    {"id": "sellerie", "rect": [1800, 200, 2000, 460], "ground": "wood", "theme": "storage", "spawn": "human"},
+    {"id": "ferme_cuisine", "rect": [400, 1000, 750, 1450], "ground": "tile", "theme": "kitchen", "spawn": "human"},
+    {"id": "ferme_chambre", "rect": [750, 1000, 1100, 1220], "ground": "wood", "theme": "bedroom", "spawn": "human"},
+    {"id": "ferme_salon", "rect": [750, 1220, 1100, 1450], "ground": "wood", "theme": "living", "spawn": "human"},
+
+    {"id": "jardin_manoir", "rect": [2940, 100, 5100, 1460], "ground": "grass", "theme": "garden"},
+    {"id": "salle_a_manger", "rect": [3300, 250, 3800, 650], "ground": "wood", "theme": "dining", "spawn": "human"},
+    {"id": "cuisine_manoir", "rect": [3300, 650, 3800, 1000], "ground": "tile", "theme": "kitchen", "spawn": "human"},
+    {"id": "salle_de_bain", "rect": [3300, 1000, 3800, 1250], "ground": "tile", "theme": "bathroom", "spawn": "human"},
+    {"id": "bibliotheque", "rect": [3800, 250, 4300, 600], "ground": "carpet", "theme": "library", "spawn": "human"},
+    {"id": "grand_hall", "rect": [3800, 600, 4300, 1250], "ground": "stone", "theme": "hall", "spawn": "human"},
+    {"id": "salon_biais", "poly": [[4300, 250], [4500, 250], [4800, 550], [4800, 850], [4300, 850]],
+     "ground": "carpet", "theme": "living", "spawn": "human"},
+    {"id": "chambre_manoir", "rect": [4300, 850, 4800, 1250], "ground": "wood", "theme": "bedroom", "spawn": "human"},
+    {"id": "garage_manoir", "rect": [2980, 1100, 3250, 1430], "ground": "concrete", "theme": "garage", "spawn": "human"},
+
+    {"id": "cimetiere", "rect": [100, 2050, 1700, 3500], "ground": "cemetery"},
+    {"id": "tombes", "rect": [150, 2100, 1150, 3450], "ground": "cemetery", "spawn": "zombie"},
+    {"id": "chapelle", "poly": [[1300, 3000], [1300, 2450], [1450, 2300], [1600, 2450], [1600, 3000]],
+     "ground": "stone", "theme": "chapel"},
+    {"id": "gardien_salon", "rect": [1850, 2150, 2350, 2420], "ground": "wood", "theme": "living", "spawn": "human"},
+    {"id": "gardien_chambre", "rect": [1850, 2420, 2100, 2600], "ground": "wood", "theme": "bedroom", "spawn": "human"},
+    {"id": "gardien_bain", "rect": [2100, 2420, 2350, 2600], "ground": "tile", "theme": "bathroom", "spawn": "human"},
+    {"id": "parking", "rect": [1800, 2800, 2400, 3450], "ground": "asphalt"},
+
+    {"id": "parking_epicerie", "rect": [2900, 2600, 3800, 2900], "ground": "asphalt"},
+    {"id": "epicerie", "rect": [3000, 2050, 3500, 2550], "ground": "tile", "theme": "shop", "spawn": "human"},
+    {"id": "reserve", "rect": [3500, 2050, 3700, 2550], "ground": "concrete", "theme": "storage", "spawn": "human"},
+    {"id": "maison_l_salon", "rect": [4000, 2050, 4400, 2450], "ground": "wood", "theme": "living", "spawn": "human"},
+    {"id": "maison_l_cuisine", "rect": [4400, 2050, 4700, 2450], "ground": "tile", "theme": "kitchen", "spawn": "human"},
+    {"id": "maison_l_chambre", "rect": [4000, 2450, 4400, 2750], "ground": "carpet", "theme": "bedroom", "spawn": "human"},
+    {"id": "pignon_sejour", "rect": [4150, 3000, 4550, 3450], "ground": "wood", "theme": "living", "spawn": "human"},
+    {"id": "pignon_chambre", "poly": [[4550, 3000], [4750, 3000], [4950, 3220], [4750, 3450], [4550, 3450]],
+     "ground": "carpet", "theme": "bedroom", "spawn": "human"}
+  ],
+
+  "walls": [
+    {"rect": [80, 80, 1100, 900], "t": 10, "style": "fence"},
+    {"path": [[1300, 200], [2000, 200], [2000, 750], [1300, 750]], "closed": true, "t": 28, "style": "wood"},
+    {"path": [[1800, 200], [1800, 460], [2000, 460]], "t": 20, "style": "wood"},
+    {"rect": [400, 1000, 1100, 1450], "t": 24, "style": "brick"},
+    {"path": [[750, 1000], [750, 1450]], "t": 20, "style": "brick"},
+    {"path": [[750, 1220], [1100, 1220]], "t": 20, "style": "brick"},
+
+    {"rect": [2920, 80, 5120, 1480], "t": 30, "style": "hedge"},
+    {"path": [[3300, 250], [4500, 250], [4800, 550], [4800, 1250], [3300, 1250]], "closed": true, "t": 26, "style": "stone"},
+    {"path": [[3800, 250], [3800, 1250]], "t": 20, "style": "stone"},
+    {"path": [[3300, 650], [3800, 650]], "t": 20, "style": "stone"},
+    {"path": [[3300, 1000], [3800, 1000]], "t": 20, "style": "stone"},
+    {"path": [[3800, 600], [4300, 600]], "t": 20, "style": "stone"},
+    {"path": [[4300, 250], [4300, 1250]], "t": 20, "style": "stone"},
+    {"path": [[4300, 850], [4800, 850]], "t": 20, "style": "stone"},
+    {"rect": [2980, 1100, 3250, 1430], "t": 22, "style": "concrete"},
+
+    {"rect": [100, 2050, 1700, 3500], "t": 8, "style": "iron"},
+    {"path": [[1300, 3000], [1300, 2450], [1450, 2300], [1600, 2450], [1600, 3000]], "closed": true, "t": 26, "style": "stone"},
+    {"rect": [1850, 2150, 2350, 2600], "t": 22, "style": "wood"},
+    {"path": [[1850, 2420], [2350, 2420]], "t": 18, "style": "wood"},
+    {"path": [[2100, 2420], [2100, 2600]], "t": 18, "style": "wood"},
+
+    {"rect": [3000, 2050, 3700, 2550], "t": 24, "style": "concrete"},
+    {"path": [[3500, 2050], [3500, 2550]], "t": 20, "style": "concrete"},
+    {"path": [[4000, 2050], [4700, 2050], [4700, 2450], [4400, 2450], [4400, 2750], [4000, 2750]], "closed": true, "t": 24, "style": "brick"},
+    {"path": [[4400, 2050], [4400, 2450]], "t": 20, "style": "brick"},
+    {"path": [[4000, 2450], [4400, 2450]], "t": 20, "style": "brick"},
+    {"path": [[4150, 3000], [4750, 3000], [4950, 3220], [4750, 3450], [4150, 3450]], "closed": true, "t": 24, "style": "wood"},
+    {"path": [[4550, 3000], [4550, 3450]], "t": 20, "style": "wood"}
+  ],
+
+  "doors": [
+    [1100, 500, 150], [600, 900, 150],
+    [1650, 750, 170], [2000, 600], [1800, 330],
+    [575, 1450], [400, 1200], [1100, 1330], [750, 1120], [750, 1350], [930, 1220],
+
+    [4000, 1480, 170], [2920, 700, 150], [5120, 1000, 150],
+    [4050, 1250, 140], [3300, 820], [4800, 1050],
+    [3800, 430], [3800, 900], [3800, 1130], [3550, 650], [3550, 1000], [4050, 600],
+    [4300, 430], [4300, 730], [4300, 1050], [4550, 850],
+    [3115, 1100, 170],
+
+    [900, 2050, 170], [1700, 2700, 150], [400, 3500, 150],
+    [1450, 3000, 130], [1600, 2750],
+    [2350, 2280], [2100, 2150], [1975, 2420], [2225, 2420],
+
+    [3350, 2050, 160], [3700, 2400], [3500, 2300],
+    [4200, 2050], [4700, 2250], [4200, 2750], [4400, 2250], [4200, 2450],
+    [4150, 3220], [4350, 3000], [4550, 3220]
+  ],
+
+  "obstacles": [
+    {"kind": "silo", "at": [2230, 980], "r": 75},
+    {"kind": "well", "at": [1300, 1330], "r": 34},
+    {"kind": "tree", "at": [180, 1100], "r": 34}, {"kind": "tree", "at": [230, 1380], "r": 30},
+    {"kind": "tree", "at": [1250, 120], "r": 30}, {"kind": "tree", "at": [2300, 300], "r": 34},
+    {"kind": "tree", "at": [2200, 1350], "r": 30},
+
+    {"kind": "tree", "at": [3080, 300], "r": 36}, {"kind": "tree", "at": [3100, 800], "r": 32},
+    {"kind": "tree", "at": [4980, 300], "r": 36}, {"kind": "tree", "at": [4970, 1300], "r": 34},
+    {"kind": "rock", "at": [3600, 1380], "r": 55},
+
+    {"kind": "tree", "at": [1250, 2150], "r": 34}, {"kind": "tree", "at": [1550, 3300], "r": 36},
+    {"kind": "tree", "at": [1250, 3350], "r": 28},
+    {"kind": "grave", "at": [260, 2250]}, {"kind": "grave", "at": [370, 2250], "angle": 6},
+    {"kind": "grave", "at": [480, 2250]}, {"kind": "grave", "at": [590, 2250], "angle": -8},
+    {"kind": "grave", "at": [820, 2250]}, {"kind": "grave", "at": [930, 2250], "angle": 10},
+    {"kind": "grave", "at": [1040, 2250]},
+    {"kind": "grave", "at": [260, 2470], "angle": -5}, {"kind": "grave", "at": [370, 2470]},
+    {"kind": "grave", "at": [480, 2470], "angle": 12}, {"kind": "grave", "at": [590, 2470]},
+    {"kind": "grave", "at": [820, 2470]}, {"kind": "grave", "at": [930, 2470], "angle": -10},
+    {"kind": "grave", "at": [1040, 2470]},
+    {"kind": "grave", "at": [260, 2690]}, {"kind": "grave", "at": [370, 2690], "angle": 8},
+    {"kind": "grave", "at": [590, 2690], "angle": -6}, {"kind": "grave", "at": [820, 2690]},
+    {"kind": "grave", "at": [930, 2690]}, {"kind": "grave", "at": [1040, 2690], "angle": 15},
+    {"kind": "grave", "at": [260, 2910]}, {"kind": "grave", "at": [370, 2910]},
+    {"kind": "grave", "at": [480, 2910], "angle": -12}, {"kind": "grave", "at": [590, 2910]},
+    {"kind": "grave", "at": [820, 2910], "angle": 5}, {"kind": "grave", "at": [1040, 2910]},
+    {"kind": "grave", "at": [260, 3130], "angle": 9}, {"kind": "grave", "at": [480, 3130]},
+    {"kind": "grave", "at": [590, 3130]}, {"kind": "grave", "at": [820, 3130], "angle": -7},
+    {"kind": "grave", "at": [930, 3130]}, {"kind": "grave", "at": [1040, 3130]},
+    {"kind": "grave", "at": [370, 3330]}, {"kind": "grave", "at": [480, 3330], "angle": 11},
+    {"kind": "grave", "at": [820, 3330]}, {"kind": "grave", "at": [930, 3330], "angle": -9},
+
+    {"kind": "pump", "at": [3200, 2700], "r": 22}, {"kind": "pump", "at": [3500, 2700], "r": 22},
+    {"kind": "tree", "at": [3900, 3100], "r": 34}, {"kind": "tree", "at": [3300, 3250], "r": 38},
+    {"kind": "tree", "at": [5050, 2200], "r": 32}, {"kind": "tree", "at": [3700, 3450], "r": 30}
+  ],
+
+  "props": [
+    {"kind": "car", "at": [1200, 1680]}, {"kind": "car", "at": [3600, 1820], "angle": 180},
+    {"kind": "car", "at": [2650, 700], "angle": 90}, {"kind": "car", "at": [2600, 2600], "angle": 95},
+    {"kind": "car", "at": [4700, 1700], "angle": 8},
+    {"kind": "car", "at": [1950, 2980], "angle": 90}, {"kind": "car", "at": [2200, 3150], "angle": 90},
+    {"kind": "car", "at": [3050, 2800]}, {"kind": "car", "at": [3650, 2800], "angle": 5},
+    {"kind": "dumpster", "at": [3780, 2300], "angle": 90}, {"kind": "dumpster", "at": [2380, 1500]},
+    {"kind": "hay_bale", "at": [400, 300]}, {"kind": "hay_bale", "at": [700, 600], "angle": 40},
+    {"kind": "hay_bale", "at": [900, 250], "angle": 90}
+  ]
+}
