@@ -495,6 +495,28 @@ def test_zombie_bot_finds_a_human_in_another_room():
     assert real is not None
 
 
+def test_path_reaches_a_player_wedged_in_a_wall_corner():
+    """Joueur collé à l'angle de deux murs (sa case de navigation est « bloquée ») : on trouve quand même."""
+    w = empty_world()
+    assert w.nav.cell_of(832, 831) in w.nav.blocked     # coin des murs x=800 / y=800 du manoir
+    assert w.nav.path((1300, 300), (832, 831))
+
+
+def test_bot_does_not_repath_every_tick_when_target_is_unreachable(monkeypatch):
+    w = empty_world()
+    h = w.add_player("H")
+    z = w.add_player("Z", bot=True)
+    w._set_role(z, ZOMBIE)
+    w._teleport(z, (1300, 300))
+    w._teleport(h, (2000, 1200))
+    h.frozen_until = 1e9
+    calls = []
+    monkeypatch.setattr(w.nav, "path", lambda a, b: calls.append(1) or [])
+    monkeypatch.setattr(w, "_los", lambda a, b: False)
+    run(w, 2)
+    assert len(calls) <= 5                              # 2 s / 0,5 s (+1 au démarrage)
+
+
 def test_bots_fill_and_leave():
     w = World(Settings(fill_to=8), seed=7)
     p = w.add_player("A")

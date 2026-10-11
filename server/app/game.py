@@ -125,8 +125,21 @@ class NavGrid:
     def center(self, c: tuple[int, int]) -> tuple[float, float]:
         return ((c[0] + 0.5) * self.cell, (c[1] + 0.5) * self.cell)
 
+    def nearest_free(self, c: tuple[int, int], radius: int = 3) -> tuple[int, int]:
+        """Case libre la plus proche (un joueur collé à un angle de murs est dans une case « bloquée »)."""
+        if c not in self.blocked:
+            return c
+        for r in range(1, radius + 1):
+            ring = [(c[0] + dx, c[1] + dy) for dx in range(-r, r + 1) for dy in range(-r, r + 1)
+                    if max(abs(dx), abs(dy)) == r]
+            free = [n for n in ring if n not in self.blocked
+                    and 0 <= n[0] < self.cols and 0 <= n[1] < self.rows]
+            if free:
+                return min(free, key=lambda n: (n[0] - c[0]) ** 2 + (n[1] - c[1]) ** 2)
+        return c
+
     def path(self, start: tuple[float, float], goal: tuple[float, float]) -> list[tuple[float, float]]:
-        s, g = self.cell_of(*start), self.cell_of(*goal)
+        s, g = self.cell_of(*start), self.nearest_free(self.cell_of(*goal))
         if s == g:
             return [goal]
 
@@ -695,7 +708,7 @@ class World:
                 wp = goal
             else:
                 b.repath_t -= dt
-                if b.repath_t <= 0 or not b.path:
+                if b.repath_t <= 0:            # même sans chemin trouvé : jamais plus d'un calcul par 0,5 s
                     b.path, b.repath_t = self.nav.path(pos, goal), 0.5
                 while b.path and math.hypot(b.path[0][0] - p.x, b.path[0][1] - p.y) < 28:
                     b.path.pop(0)
