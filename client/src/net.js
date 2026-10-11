@@ -67,7 +67,7 @@ export class Net {
     this.propInfo = new Map(); // id -> {kind, w, h}
     this.props = new Map();    // id -> Track
     this.propHp = new Map();   // id -> PV en % (0 = cassé)
-    this.players = new Map();  // id -> {tr, role, flags}
+    this.players = new Map();  // id -> {tr, role, flags, hp}
     this.names = new Map();
     this.cfg = { round: 300, freeze: 10, min: 2, player_r: 16 };
     this.meta = { ph: 'wait', tl: 0, w: null, fz: 0, n: [0, 0], me: [0, 0], at: 0 };
@@ -131,12 +131,13 @@ export class Net {
     if (m.names) this._setNames(m.names);
 
     const seen = new Set();
-    for (const [id, x, y, a, role, flags] of m.p) {
+    for (const [id, x, y, a, role, flags, hp = 100] of m.p) {
       seen.add(id);
       let e = this.players.get(id);
-      if (!e) { e = { tr: new Track(), role, flags }; this.players.set(id, e); }
+      if (!e) { e = { tr: new Track(), role, flags, hp }; this.players.set(id, e); }
       e.role = role;
       e.flags = flags;
+      e.hp = hp;
       e.tr.push(t, x, y, a);
     }
     for (const id of this.players.keys()) if (!seen.has(id)) this.players.delete(id);

@@ -148,6 +148,9 @@ export class GameScene extends Phaser.Scene {
       sound.crash(ev.x, ev.y);
       const info = net.propInfo.get(ev.id);
       if (info) this.debris(ev.x, ev.y, info);
+    } else if (ev.k === 'kill') {
+      sound.death(ev.x, ev.y);
+      this.splat(ev.x, ev.y, 22, 46);
     } else if (ev.k === 'infect') {
       this.splat(ev.x, ev.y, 14, 38);
     }
@@ -287,6 +290,15 @@ export class GameScene extends Phaser.Scene {
       const ay = Math.sin(s.a);
       const col = zombie ? ZOMBIE_BODY : Phaser.Display.Color.HSLToColor((id * 0.137) % 1, 0.35, 0.78).color;
 
+      if (e.flags & 4) {                                 // abattu : réapparaît bientôt (intouchable)
+        g.fillStyle(ZOMBIE_BODY, 0.22);
+        g.fillCircle(s.x, s.y, R);
+        g.lineStyle(2, 0x7a1018, 0.5);
+        g.strokeCircle(s.x, s.y, R + 6);
+        this.label(`p${id}`, net.name(id), s.x, s.y - R - 12, '#6f7d63', seen);
+        continue;
+      }
+
       g.fillStyle(0x000000, 0.35);
       g.fillCircle(s.x + 3, s.y + 4, R);
       g.fillStyle(col, 1);
@@ -315,6 +327,13 @@ export class GameScene extends Phaser.Scene {
       if (id === net.id) {
         g.lineStyle(2, 0xffffff, 0.9);
         g.strokeCircle(s.x, s.y, R + 4);
+      }
+      if (zombie && e.hp < 100) {                        // barre de vie d'un zombie blessé
+        const bw = 2 * R + 8;
+        g.fillStyle(0x000000, 0.7);
+        g.fillRect(s.x - bw / 2 - 1, s.y + R + 5, bw + 2, 6);
+        g.fillStyle(e.hp > 35 ? 0x9bc46a : 0xd23a3a, 1);
+        g.fillRect(s.x - bw / 2, s.y + R + 6, bw * e.hp / 100, 4);
       }
       this.label(`p${id}`, net.name(id), s.x, s.y - R - 12, zombie ? '#a9d98a' : '#efe6d0', seen);
     }

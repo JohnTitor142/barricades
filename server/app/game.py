@@ -11,6 +11,8 @@ Règles
 - Tout le monde peut *frapper* (les objets glissent, les joueurs reculent).
   Chaque coup abîme le meuble ; à 0 PV il casse (débloque une barricade) et revient à la manche suivante.
 - Les humains ont un pistolet : un tir pousse les objets et ralentit les zombies.
+- Les zombies ont beaucoup de PV : balles et coups des humains finissent par les abattre ;
+  ils réapparaissent alors dans leur salle après quelques secondes (invulnérables pendant l'attente).
 - Le serveur fait autorité sur tout (positions, tirs, infection).
 """
 from __future__ import annotations
@@ -59,6 +61,12 @@ SHOT_IMPULSE = 1800.0
 MAG_SIZE = 6
 RELOAD_TIME = 2.0
 SHOT_KNOCKBACK = 140.0
+
+# --- Points de vie des zombies -----------------------------------------------
+ZOMBIE_HP = 100
+BULLET_DAMAGE = 10                 # ~10 balles (presque 2 chargeurs) pour abattre un zombie
+MELEE_DAMAGE = 20                  # 5 coups, mais au contact = risque d'infection
+RESPAWN_TIME = 5.0
 
 HUMAN, ZOMBIE = 0, 1
 CAT_WALL, CAT_PROP, CAT_HUMAN, CAT_ZOMBIE = 1, 2, 4, 8
@@ -221,6 +229,8 @@ class Player:
     ammo: int = MAG_SIZE
     slow_until: float = 0.0
     frozen_until: float = 0.0
+    hp: int = ZOMBIE_HP                # n'a de sens que pour un zombie
+    respawn_until: float = 0.0
     bot: BotBrain | None = None
     ctrl: pymunk.Body | None = None
     pivot: pymunk.PivotJoint | None = None
@@ -421,6 +431,7 @@ class World:
 
     def _set_role(self, p: Player, role: int) -> None:
         p.role = role
+        p.hp = ZOMBIE_HP
         p.shape.filter = ShapeFilter(categories=CAT_ZOMBIE if role == ZOMBIE else CAT_HUMAN)
 
     # ------------------------------------------------------------------ spawns
@@ -450,7 +461,7 @@ class World:
             taken.append(pos)
             self._teleport(p, pos)
             p.ammo, p.reload_t, p.shot_cd, p.hit_cd = MAG_SIZE, 0.0, 0.0, 0.0
-            p.slow_until = p.frozen_until = 0.0
+            p.slow_until = p.frozen_until = p.respawn_until = 0.0
             p.kbx = p.kby = 0.0
 
     def _teleport(self, p: Player, pos: tuple[float, float]) -> None:
@@ -599,9 +610,24 @@ class World:
                     other = self.players[eid]
                     other.kbx += ax * KNOCKBACK
                     other.kby += ay * KNOCKBACK
+                    if p.role == HUMAN and other.role == ZOMBIE:
+                        self._damage_zombie(other, MELEE_DAMAGE, p)
         self.events.append({"k": "hit", "id": p.id, "x": round(p.x + ax * 28, 1),
                             "y": round(p.y + ay * 28, 1), "a": round(p.aim, 2), "n": touched})
         return True
+
+    def _damage_zombie(self, z: Player, dmg: int, by: Player) -> None:
+        if self.now < z.frozen_until:          # figé (réveil, infection, réapparition) = invulnérable
+            return
+        z.hp -= dmg
+        if z.hp > 0:
+            return
+        self.events.append({"k": "kill", "id": z.id, "by": by.id, "x": round(z.x, 1), "y": round(z.y, 1)})
+        z.hp = ZOMBIE_HP
+        z.respawn_until = z.frozen_until = self.now + RESPAWN_TIME
+        z.slow_until = 0.0
+        z.kbx = z.kby = 0.0
+        self._teleport(z, self._spawn_point([self.map.zombie_room]))
 
     def _damage_prop(self, pr: Prop) -> None:
         pr.hp -= 1
@@ -640,6 +666,7 @@ class World:
                 z.slow_until = self.now + SLOW_TIME
                 z.kbx += ax * SHOT_KNOCKBACK
                 z.kby += ay * SHOT_KNOCKBACK
+                self._damage_zombie(z, BULLET_DAMAGE, p)
                 hit_kind = "zombie"
             else:
                 hit_kind = "wall"
@@ -683,7 +710,7 @@ class World:
                     self.hit(p)
                 b.last_pos, b.check_t = pos, 0.0
         else:
-            zs = self.zombies()
+            zs = [z for z in self.zombies() if self.now >= z.respawn_until]
             near = min(zs, key=lambda z: (z.x - p.x) ** 2 + (z.y - p.y) ** 2) if zs else None
             d = math.hypot(near.x - p.x, near.y - p.y) if near else 1e9
             if near is not None and d < 380:
@@ -748,8 +775,10 @@ class World:
         """État global (identique pour tous les clients) ; consomme événements et props modifiés."""
         players = []
         for p in self.players.values():
-            flags = (1 if self.now < p.slow_until else 0) | (2 if self.now < p.frozen_until else 0)
-            players.append([p.id, round(p.x, 1), round(p.y, 1), round(p.aim, 2), p.role, flags])
+            flags = ((1 if self.now < p.slow_until else 0) | (2 if self.now < p.frozen_until else 0)
+                     | (4 if self.now < p.respawn_until else 0))
+            hp = round(100 * p.hp / ZOMBIE_HP) if p.role == ZOMBIE else 100
+            players.append([p.id, round(p.x, 1), round(p.y, 1), round(p.aim, 2), p.role, flags, hp])
         fz = self.freeze_until - self.now if self.phase == "play" else 0.0
         snap = {
             "t": "s", "k": self.tick, "ph": self.phase, "tl": round(max(0.0, self.timer), 1),

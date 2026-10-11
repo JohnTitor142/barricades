@@ -225,6 +225,28 @@ class Sound {
     this.boom(dest, t, 160 * r, 45, 0.16, 0.9);                  // souffle grave
   }
 
+  /** Râle d'un zombie abattu en (x, y). */
+  death(x, y) {
+    const dest = this.out(x, y, 0.8);
+    if (!dest) return;
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator();
+    const lp = this.ctx.createBiquadFilter();
+    const g = this.ctx.createGain();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(130, t);
+    o.frequency.exponentialRampToValueAtTime(42, t + 0.5);
+    lp.type = 'lowpass';
+    lp.frequency.value = 700;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.6, t + 0.04);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.52);
+    o.connect(lp).connect(g).connect(dest);
+    o.start(t);
+    o.stop(t + 0.55);
+    this.noiseBurst(dest, t, 0.3, 'bandpass', 500, 0.4, 0.6);   // gargouillis
+  }
+
   /** Meuble qui se brise en (x, y). */
   crash(x, y) {
     const dest = this.out(x, y, 0.9);

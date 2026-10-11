@@ -73,6 +73,7 @@ input:focus-visible, button:focus-visible { outline: 3px solid var(--rot); outli
 #feed div { padding: 6px 12px; background: var(--panel); border-right: 3px solid var(--line); font-size: 14px; animation: slide .2s ease-out; }
 #feed .infect { border-right-color: var(--blood); }
 #feed .zero { border-right-color: var(--rot); }
+#feed .kill { border-right-color: var(--bone); }
 @keyframes slide { from { transform: translateX(20px); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { #feed div { animation: none; } }
 @media (max-width: 700px) { #hint { display: none; } #counts { top: 70px; } #music { bottom: 70px; } }

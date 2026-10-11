@@ -4,14 +4,18 @@ import pymunk
 import pytest
 
 from app.game import (
+    BULLET_DAMAGE,
     CAT_ZOMBIE,
     HIT_COOLDOWN,
     HUMAN,
     INFECT_DIST,
     MAG_SIZE,
+    MELEE_DAMAGE,
     PLAYER_R,
     PROP_HP,
+    RESPAWN_TIME,
     ZOMBIE,
+    ZOMBIE_HP,
     Settings,
     World,
 )
@@ -267,6 +271,70 @@ def test_shot_hits_zombie_and_slows_it():
     x1 = z.x
     run(w, 1)
     assert slowed < 0.7 * (z.x - x1)
+
+
+def zombie_target(w, x=500, y=400):
+    """Humain qui vise un zombie placé droit devant lui."""
+    h = w.add_player("H")
+    z = w.add_player("Z")
+    w._set_role(z, ZOMBIE)
+    w._teleport(h, (x - 200, y))
+    w._teleport(z, (x, y))
+    h.aim = 0
+    return h, z
+
+
+def test_bullets_eventually_kill_a_zombie_who_respawns_in_his_room():
+    w = empty_world()
+    h, z = zombie_target(w)
+    shots = 0
+    while not any(e["k"] == "kill" for e in w.events):
+        w._teleport(z, (500, 400))               # le recul l'éloigne : on le remet en place
+        z.kbx = z.kby = 0.0
+        if w.shoot(h):
+            shots += 1
+        run(w, 0.4)
+        assert shots <= 20
+    assert shots == math.ceil(ZOMBIE_HP / BULLET_DAMAGE)
+    x0, y0, x1, y1 = w.map.rooms[w.map.zombie_room]
+    assert x0 <= z.x <= x1 and y0 <= z.y <= y1 and z.hp == ZOMBIE_HP
+    assert w.snapshot()["p"][1][5] & 4            # drapeau « en réapparition »
+
+
+def test_melee_from_a_human_hurts_zombies_but_not_humans():
+    w = empty_world()
+    h, z = zombie_target(w, 500, 400)
+    w._teleport(h, (450, 400))
+    other = w.add_player("H2")
+    for _ in range(2):
+        run(w, HIT_COOLDOWN + DT)
+        w._teleport(h, (450, 400))
+        w._teleport(z, (500, 400))
+        assert w.hit(h)
+    assert z.hp == ZOMBIE_HP - 2 * MELEE_DAMAGE
+    assert other.hp == ZOMBIE_HP                  # PV inutilisés pour un humain : rien ne bouge
+    w._set_role(h, ZOMBIE)                         # un zombie ne blesse pas un autre zombie
+    run(w, HIT_COOLDOWN + DT)
+    w._teleport(z, (500, 400))
+    hp = z.hp
+    w.hit(h)
+    assert z.hp == hp
+
+
+def test_respawning_zombie_is_invulnerable_and_harmless():
+    w = empty_world()
+    h, z = zombie_target(w)
+    z.hp = BULLET_DAMAGE
+    w.shoot(h)
+    assert z.respawn_until > w.now
+    w._teleport(h, (z.x + 10, z.y))              # collé à lui pendant la réapparition
+    w._infection()
+    assert h.role == HUMAN
+    hp = z.hp
+    w._damage_zombie(z, 50, h)
+    assert z.hp == hp
+    run(w, RESPAWN_TIME + 0.1)
+    assert w.now >= z.frozen_until
 
 
 def test_zombies_cannot_shoot_and_reload_works():

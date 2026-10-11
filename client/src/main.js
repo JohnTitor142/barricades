@@ -33,6 +33,7 @@ function toast(text, kind) {
 net.on((ev) => {
   if (ev.k === 'infect') toast(`${net.name(ev.id)} a été infecté par ${net.name(ev.by)}`, 'infect');
   else if (ev.k === 'zero') toast(`${net.name(ev.id)} est le patient zéro`, 'zero');
+  else if (ev.k === 'kill') toast(`${net.name(ev.by)} a abattu ${net.name(ev.id)}`, 'kill');
 });
 
 function showMenu(message) {
