@@ -22,6 +22,8 @@ const OBSTACLE = {
 const HUMAN = 0;
 const ZOMBIE_BODY = 0x7ea35c;
 const BLOODS = [0x6e0f16, 0x8b1a22, 0x540b10];
+const WEAPON_LABEL = { pistol: 'PISTOLET', mp9: 'MP9', shotgun: 'POMPE' };
+const GUN_LENGTH = { pistol: 30, mp9: 34, shotgun: 40 };
 // Plafonds pour que le coût d'affichage reste borné même en fin de manche longue.
 const MAX_SHOT_SPLATS = 300; // taches d'impact de balle par manche (les infections passent toujours)
 const MAX_FX = 48;           // traînées de balle / coups affichés en même temps
@@ -39,6 +41,7 @@ export class GameScene extends Phaser.Scene {
     this.labels = new Map();
     this.fx = [];
     this.shotSplats = 0;
+    this.lastShotSound = new Map();
     this.lastPhase = null;
     this.lastSend = 0;
     this.lastFire = 0;
@@ -187,7 +190,10 @@ export class GameScene extends Phaser.Scene {
   onNetEvent(ev) {
     const now = performance.now();
     if (ev.k === 'shot') {
-      sound.shot(ev.x1, ev.y1);
+      // Fusil à pompe : 7 plombs = 7 événements dans le même instant ; un seul son par décharge.
+      const last = this.lastShotSound.get(ev.id) ?? -1e9;
+      if (now - last > 60) sound.shot(ev.x1, ev.y1, ev.w);
+      this.lastShotSound.set(ev.id, now);
       this.addFx({ k: 'tracer', ev, until: now + 90 });
       if (ev.h === 'zombie' && this.shotSplats < MAX_SHOT_SPLATS) {
         this.shotSplats += 1;
@@ -196,6 +202,8 @@ export class GameScene extends Phaser.Scene {
     } else if (ev.k === 'hit') {
       sound.hit(ev.x, ev.y, ev.n > 0);
       this.addFx({ k: 'swing', ev, until: now + 150 });
+    } else if (ev.k === 'pickup') {
+      if (ev.id === net.id) sound.pickup();
     } else if (ev.k === 'break') {
       sound.crash(ev.x, ev.y);
       const info = net.propInfo.get(ev.id);
@@ -336,6 +344,25 @@ export class GameScene extends Phaser.Scene {
     const R = net.cfg.player_r;
     g.clear();
     const seen = new Set();
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 250);
+    for (const [id, kind, x, y] of net.pickups) {        // armes au sol : halo qui pulse + silhouette + nom
+      g.fillStyle(0xffd27a, 0.14 + 0.14 * pulse);
+      g.fillCircle(x, y, 26);
+      g.lineStyle(2, 0xd8cdb4, 0.9);                       // liseré clair : lisible sur fond sombre
+      if (kind === 'shotgun') {
+        g.fillStyle(0x6a4a2e, 1);
+        g.fillRect(x - 22, y - 4, 16, 8);
+        g.strokeRect(x - 22, y - 4, 40, 8);
+        g.fillStyle(0x222222, 1);
+        g.fillRect(x - 6, y - 3, 24, 6);
+      } else {
+        g.fillStyle(0x2a2a2e, 1);
+        g.fillRect(x - 15, y - 6, 30, 11);
+        g.fillRect(x - 3, y + 4, 7, 11);                  // chargeur
+        g.strokeRect(x - 15, y - 6, 30, 11);
+      }
+      this.label(`w${id}`, WEAPON_LABEL[kind] ?? kind, x, y - 22, '#ffd27a', seen);
+    }
     for (const [id, e] of net.players) {
       const s = e.tr.sample(rt, true);
       if (!s) continue;
@@ -366,8 +393,20 @@ export class GameScene extends Phaser.Scene {
         g.fillStyle(0x7a1018, 0.9);                     // bouche ensanglantée
         g.fillCircle(s.x + ax * 7, s.y + ay * 7, 5);
       } else {
-        g.lineStyle(5, 0x1c1c1c, 1);                    // pistolet
-        g.lineBetween(s.x + ax * 8, s.y + ay * 8, s.x + ax * 30, s.y + ay * 30);
+        const len = id === net.id ? GUN_LENGTH[net.meta.me[2]] ?? 30 : 30;
+        g.lineStyle(id === net.id && net.meta.me[2] !== 'pistol' ? 6 : 5, 0x1c1c1c, 1);   // arme
+        g.lineBetween(s.x + ax * 8, s.y + ay * 8, s.x + ax * len, s.y + ay * len);
+      }
+      const hint = net.meta.me[3];
+      if (id === net.id && zombie && hint != null && !(e.flags & 2)) {
+        // Flèche discrète vers l'humain le plus proche (par les couloirs) : un petit triangle translucide.
+        const hx = Math.cos(hint);
+        const hy = Math.sin(hint);
+        const d = R + 26;
+        const tipX = s.x + hx * (d + 12);
+        const tipY = s.y + hy * (d + 12);
+        g.fillStyle(0xe8e0d0, 0.3);
+        g.fillTriangle(tipX, tipY, s.x + hx * d - hy * 7, s.y + hy * d + hx * 7, s.x + hx * d + hy * 7, s.y + hy * d - hx * 7);
       }
 
       if (e.flags & 1) {                                 // ralenti
@@ -438,7 +477,7 @@ export class GameScene extends Phaser.Scene {
     const wp = cam.getWorldPoint(ptr.x, ptr.y);
     const aim = Math.atan2(wp.y - me.y, wp.x - me.x);
 
-    if (this.firing && time - this.lastFire > 120) {
+    if (this.firing && time - this.lastFire > 60) {           // le serveur impose la cadence de l'arme
       this.lastFire = time;
       net.sendAct('shoot');
     }
@@ -459,6 +498,14 @@ export class GameScene extends Phaser.Scene {
     this.minimap.draw(minimapDots(players, net.id));
   }
 
+  ammoText([ammo, reloading, weapon]) {
+    const name = WEAPON_LABEL[weapon] ?? weapon;
+    if (reloading) return `${name} · RECHARGEMENT`;
+    if (weapon === 'mp9') return `${name} ${ammo}/30`;
+    const mag = weapon === 'shotgun' ? 5 : 6;
+    return `${name} ${'●'.repeat(ammo)}${'○'.repeat(Math.max(0, mag - ammo))}`;
+  }
+
   updateHud(meEntry) {
     const h = this.hud;
     const { ph, w, n, me } = net.meta;
@@ -475,7 +522,7 @@ export class GameScene extends Phaser.Scene {
     const zombie = meEntry?.role !== HUMAN;
     h.role.textContent = zombie ? 'ZOMBIE' : 'HUMAIN';
     h.role.className = zombie ? 'zombie' : 'human';
-    h.ammo.textContent = zombie ? '' : (me[1] ? 'RECHARGEMENT' : '●'.repeat(me[0]) + '○'.repeat(Math.max(0, 6 - me[0])));
+    h.ammo.textContent = zombie ? '' : this.ammoText(me);
 
     let text = '';
     let cls = '';

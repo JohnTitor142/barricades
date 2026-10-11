@@ -214,15 +214,34 @@ class Sound {
     o.stop(t + len + 0.02);
   }
 
-  /** Coup de pistolet tiré depuis (x, y). */
-  shot(x, y) {
-    const dest = this.out(x, y, 0.9);
+  /** Tir depuis (x, y) ; le son dépend de l'arme (pistolet, MP9 plus sec, fusil à pompe plus lourd). */
+  shot(x, y, weapon = 'pistol') {
+    const dest = this.out(x, y, weapon === 'mp9' ? 0.6 : 0.9);
     if (!dest) return;
     const t = this.ctx.currentTime;
     const r = 0.9 + Math.random() * 0.2; // légère variation pour éviter l'effet « disque rayé »
-    this.noiseBurst(dest, t, 0.03, 'highpass', 2500, 0.9, r);   // claquement
-    this.noiseBurst(dest, t, 0.22, 'lowpass', 1400 * r, 0.8, r); // détonation
-    this.boom(dest, t, 160 * r, 45, 0.16, 0.9);                  // souffle grave
+    if (weapon === 'mp9') {
+      this.noiseBurst(dest, t, 0.02, 'highpass', 3200, 0.8, r);
+      this.noiseBurst(dest, t, 0.09, 'lowpass', 2200 * r, 0.6, r);
+      this.boom(dest, t, 220 * r, 70, 0.07, 0.6);
+    } else if (weapon === 'shotgun') {
+      this.noiseBurst(dest, t, 0.04, 'highpass', 1800, 1, r);
+      this.noiseBurst(dest, t, 0.4, 'lowpass', 900 * r, 1, r * 0.8);
+      this.boom(dest, t, 120 * r, 32, 0.32, 1);
+    } else {
+      this.noiseBurst(dest, t, 0.03, 'highpass', 2500, 0.9, r);   // claquement
+      this.noiseBurst(dest, t, 0.22, 'lowpass', 1400 * r, 0.8, r); // détonation
+      this.boom(dest, t, 160 * r, 45, 0.16, 0.9);                  // souffle grave
+    }
+  }
+
+  /** Arme ramassée (entendue seulement par soi). */
+  pickup() {
+    const dest = this.out(this.listener.x, this.listener.y, 0.6);
+    if (!dest) return;
+    const t = this.ctx.currentTime;
+    this.boom(dest, t, 900, 600, 0.05, 0.4, 'triangle');
+    this.boom(dest, t + 0.07, 1300, 900, 0.06, 0.4, 'triangle');
   }
 
   /** Râle d'un zombie abattu en (x, y). */

@@ -1,26 +1,33 @@
+import dataclasses
 import math
 
 import pymunk
 import pytest
 
+import app.game as game_mod
 from app.game import (
     BULLET_DAMAGE,
     CAT_WALL,
     CAT_ZOMBIE,
+    FALLOFF_MIN,
     FLOW_REFRESH,
     HIT_COOLDOWN,
     HUMAN,
     INFECT_DIST,
     MAG_SIZE,
     MELEE_DAMAGE,
+    PICKUP_COUNT,
+    PICKUP_RESPAWN,
     PLAYER_R,
     PROP_KINDS,
     RESPAWN_TIME,
+    WEAPONS,
     ZOMBIE,
     ZOMBIE_HP,
     NavGrid,
     Settings,
     World,
+    falloff,
 )
 from app.maps import MAPS, cut_doors
 
@@ -298,7 +305,14 @@ def test_hit_cooldown():
 
 
 # -------------------------------------------------------------------- tir
-def test_shot_pushes_prop_and_costs_ammo():
+@pytest.fixture
+def no_spread(monkeypatch):
+    """Tirs parfaitement précis : pour tester poussée, ralentissement, tir ami... sans le hasard de la dispersion."""
+    precise = {k: dataclasses.replace(v, spread=0.0, bloom=0.0, bloom_max=0.0) for k, v in WEAPONS.items()}
+    monkeypatch.setattr(game_mod, "WEAPONS", precise)
+
+
+def test_shot_pushes_prop_and_costs_ammo(no_spread):
     w = empty_world()
     pr = w._add_prop("chair", 700, 400, 0)
     p = w.add_player("A")
@@ -311,7 +325,7 @@ def test_shot_pushes_prop_and_costs_ammo():
     assert any(e["k"] == "shot" and e["h"] == "prop" for e in w.snapshot()["ev"])
 
 
-def test_bullets_pass_through_friends():
+def test_bullets_pass_through_friends(no_spread):
     """Pas de tir ami : un humain placé dans la ligne de tir ne bloque ni ne subit le tir."""
     w = empty_world()
     a, friend, z = w.add_player("A"), w.add_player("F"), w.add_player("Z")
@@ -325,7 +339,7 @@ def test_bullets_pass_through_friends():
     assert friend.slow_until == 0 and friend.kbx == 0
 
 
-def test_shot_hits_zombie_and_slows_it():
+def test_shot_hits_zombie_and_slows_it(no_spread):
     w = empty_world()
     a, z = w.add_player("A"), w.add_player("Z")
     w._set_role(z, ZOMBIE)
@@ -355,7 +369,7 @@ def zombie_target(w, x=500, y=400):
     return h, z
 
 
-def test_bullets_eventually_kill_a_zombie_who_respawns_in_his_room():
+def test_bullets_eventually_kill_a_zombie_who_respawns_in_his_room(no_spread):
     w = empty_world(intermission_seconds=999)      # ~20 s de tir : pas de nouvelle manche (qui changerait les rôles)
     h, z = zombie_target(w)
     shots = 0
@@ -366,9 +380,109 @@ def test_bullets_eventually_kill_a_zombie_who_respawns_in_his_room():
             shots += 1
         run(w, 0.4)
         assert shots <= 2 * ZOMBIE_HP / BULLET_DAMAGE
-    assert shots == math.ceil(ZOMBIE_HP / BULLET_DAMAGE)
+    assert shots == math.ceil(ZOMBIE_HP / BULLET_DAMAGE)       # tirs précis (no_spread), à courte portée
     assert any(w.map.areas[i].contains(z.x, z.y) for i in w.map.zombie_areas) and z.hp == ZOMBIE_HP
     assert w.snapshot()["p"][1][5] & 4            # drapeau « en réapparition »
+
+
+def zombie_line(n=1, x=300, y=400, distance=200):
+    w = empty_world(intermission_seconds=999)
+    h = w.add_player("H")
+    w._teleport(h, (x, y))
+    h.aim = 0
+    zs = []
+    for i in range(n):
+        z = w.add_player(f"Z{i}")
+        w._set_role(z, ZOMBIE)
+        w._teleport(z, (x + distance, y))
+        zs.append(z)
+    return w, h, zs
+
+
+def hits_out_of(w, h, z, shots, distance):
+    """Proportion de balles qui touchent un zombie immobile à `distance` (repositionné à chaque tir)."""
+    hits = 0
+    for _ in range(shots):
+        run(w, WEAPONS[h.weapon].cooldown + 0.6)   # assez de pause pour que la dispersion retombe
+        h.reload_t, h.ammo = 0.0, 5
+        w._teleport(z, (h.x + distance, h.y))
+        z.kbx = z.kby = 0.0
+        w.events.clear()
+        w.shoot(h)
+        hits += any(e["k"] == "shot" and e["h"] == "zombie" for e in w.events)
+    return hits / shots
+
+
+def test_shots_spread_randomly_and_miss_more_at_long_range():
+    w, h, (z,) = zombie_line()
+    z.frozen_until = 1e9                           # invulnérable : on mesure la précision, pas les dégâts
+    near = hits_out_of(w, h, z, 40, 150)
+    far = hits_out_of(w, h, z, 40, 850)
+    assert near >= 0.9 and far < 0.7 and far < near
+
+
+def test_damage_falls_off_with_distance():
+    assert falloff(100, 900) == 1.0
+    assert falloff(900, 900) == FALLOFF_MIN
+    assert 1.0 > falloff(560, 900) > FALLOFF_MIN
+
+
+def test_spraying_widens_the_spread_then_it_recovers():
+    w, h, _ = zombie_line()
+    h.ammo = 6
+    for _ in range(4):
+        h.shot_cd = 0.0
+        w.shoot(h)
+    sprayed = h.bloom
+    assert sprayed > WEAPONS["pistol"].bloom * 2
+    run(w, 1)
+    assert h.bloom < sprayed / 2
+
+
+def test_mp9_fires_much_faster_than_the_pistol_and_shotgun_fires_pellets():
+    assert WEAPONS["mp9"].cooldown < WEAPONS["pistol"].cooldown / 3
+    assert WEAPONS["mp9"].mag > WEAPONS["pistol"].mag
+    w, h, _ = zombie_line()
+    w.give_weapon(h, "shotgun")
+    w.events.clear()
+    assert w.shoot(h)
+    assert sum(e["k"] == "shot" for e in w.events) == WEAPONS["shotgun"].pellets
+
+
+def test_weapons_on_the_ground_are_picked_up_by_humans_only_and_come_back():
+    w = World(Settings(intermission_seconds=0.5, freeze_seconds=0), seed=7)
+    h, z = start_round(w, 2)
+    if h.role == ZOMBIE:
+        h, z = z, h
+    assert len(w.pickups_list()) == PICKUP_COUNT and h.weapon == "pistol"
+    pk = next(iter(w.pickups.values()))
+    w._teleport(z, (pk.x, pk.y))                   # un zombie ne ramasse rien
+    run(w, 0.2)
+    assert pk.respawn_at == 0 and z.weapon == "pistol"
+    w._teleport(z, (100, 100))
+    w._teleport(h, (pk.x, pk.y))
+    run(w, 0.2)
+    assert h.weapon == pk.kind and h.ammo == WEAPONS[pk.kind].mag and pk.respawn_at > 0
+    assert len(w.pickups_list()) == PICKUP_COUNT - 1
+    assert any(e["k"] == "pickup" for e in w.snapshot()["ev"])
+    run(w, PICKUP_RESPAWN + 0.5)
+    assert pk.respawn_at == 0                     # revenue (ailleurs)
+
+
+def test_zombie_hint_points_to_the_door_not_through_the_wall():
+    """Manoir : humain juste derrière le mur x=800, la porte est en (800, 360). La flèche vise la porte."""
+    w = empty_world(intermission_seconds=999)
+    z = w.add_player("Z")
+    h = w.add_player("H")
+    w._set_role(z, ZOMBIE)
+    w._teleport(z, (700, 700))
+    w._teleport(h, (900, 700))                     # à 200 px, mais derrière le mur
+    a = w.zombie_hint(z)
+    to_door = math.atan2(360 - 700, 800 - 700)
+    straight = 0.0
+    assert abs(a - to_door) < abs(a - straight)
+    assert w.zombie_hint(h) is None and w.me(h.id)[3] is None
+    assert w.me(z.id)[2] == "pistol" and isinstance(w.me(z.id)[3], float)
 
 
 def test_melee_from_a_human_hurts_zombies_but_not_humans():

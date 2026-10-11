@@ -13,7 +13,8 @@ jeu (tick, interpolation, autorité serveur…) quand elles apparaissent, et ava
 - Cœur du jeu : ~75-90 meubles physiques de formes variées (cercles, polygones, formes composées : piano à queue,
   canapé d'angle…, catalogue PROP_KINDS dans game.py) qu'on déplace en les FRAPPANT pour barricader les portes.
   Seuls les coups de ZOMBIE les abîment (20 à 50 coups) ; cassés, ils débloquent les situations figées.
-- Humains : pistolet (6 balles) qui pousse les meubles et ralentit les zombies. Pas de tir ami.
+- Humains : pistolet (6 balles) ; MP9 et fusil à pompe à ramasser au sol (8 par manche). Tirs imprécis
+  (dispersion + « spray » qui grandit en rafale), dégâts réduits avec la distance. Pas de tir ami.
 - Zombies : 300 PV (30 balles) ; balles et coups des humains les abattent, ils réapparaissent 5 s après dans leur salle.
 - Ambiance sombre / gore (Walking Dead) ; limite de 24 joueurs.
 
@@ -67,7 +68,7 @@ Réglages serveur par variables d'environnement : `ROUND_SECONDS`, `FREEZE_SECON
 - Ne mets pas de calcul de physique côté client : le client affiche, le serveur décide.
 
 ## État actuel
-- Serveur : 57 tests verts ; entrepôt, 24 joueurs ≈ 1,6 ms/tick (pire tick ~15 ms) ; ~30 Ko/s par client.
+- Serveur : 64 tests verts ; entrepôt, 24 joueurs ≈ 1,6 ms/tick (pire tick ~15 ms) ; ~30 Ko/s par client.
 - Client : rendu vérifié dans le navigateur (capture) ; sang/débris « cuits » dans une RenderTexture.
   Musique + sons synthétisés (Web Audio). En dev, `window.__barricade` = { game, net, sound }.
 - En ligne : https://barricade.212.227.181.202.sslip.io (Coolify, `docker-compose.coolify.yml`, 24 bots).

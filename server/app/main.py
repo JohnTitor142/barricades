@@ -51,8 +51,7 @@ async def broadcast() -> None:
     base = dumps(world.snapshot())
     sends = []
     for pid, ws in list(connections.items()):
-        ammo, reloading = world.me(pid)
-        sends.append(_send(ws, f'{base[:-1]},"me":[{ammo},{reloading}]}}'))  # seul "me" diffère par client
+        sends.append(_send(ws, f'{base[:-1]},"me":{dumps(world.me(pid))}}}'))  # seul "me" diffère par client
     if sends:
         await asyncio.gather(*sends)
 

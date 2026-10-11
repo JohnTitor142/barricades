@@ -11,7 +11,9 @@ Règles
 - Tout le monde peut *frapper* (les objets glissent, les joueurs reculent).
   Les coups de ZOMBIE abîment les meubles (20 à 50 coups) ; à 0 PV le meuble casse (débloque une barricade)
   et revient à la manche suivante. Les humains et les balles poussent sans abîmer.
-- Les humains ont un pistolet : un tir pousse les objets et ralentit les zombies.
+- Les humains ont un pistolet : un tir pousse les objets et ralentit les zombies. Des armes (MP9, fusil à
+  pompe) traînent au sol et se ramassent en marchant dessus. Les tirs sont imprécis (dispersion aléatoire qui
+  augmente quand on enchaîne) et perdent en efficacité avec la distance.
 - Les zombies ont beaucoup de PV : balles et coups des humains finissent par les abattre ;
   ils réapparaissent alors dans leur salle après quelques secondes (invulnérables pendant l'attente).
 - Le serveur fait autorité sur tout (positions, tirs, infection).
@@ -32,7 +34,7 @@ from .maps import MapDef, Obstacle, Wall, get_map
 
 TICK_RATE = 30
 # À incrémenter à chaque changement du protocole : un client d'une autre version se recharge tout seul.
-PROTOCOL_VERSION = 5
+PROTOCOL_VERSION = 6
 SUBSTEPS = 2                       # pas de physique par tick (60 Hz)
 
 # --- Monde (les cartes elles-mêmes sont dans maps.py) ----------------------
@@ -73,9 +75,49 @@ MAG_SIZE = 6
 RELOAD_TIME = 2.0
 SHOT_KNOCKBACK = 140.0
 
+
+@dataclass(frozen=True)
+class Weapon:
+    """Arme à feu. Dispersion = écart-type de l'angle de tir (radians) : `spread` de base, + `bloom` par tir
+    enchaîné (plafonné à `bloom_max`), qui retombe de BLOOM_DECAY par seconde quand on arrête."""
+    mag: int
+    cooldown: float                  # s entre deux tirs
+    reload: float
+    damage: float                    # par projectile, à courte portée
+    range: float
+    spread: float
+    bloom: float
+    bloom_max: float
+    pellets: int = 1                 # projectiles par tir (fusil à pompe)
+    push: float = SHOT_IMPULSE       # impulsion donnée aux meubles
+
+
+WEAPONS: dict[str, Weapon] = {
+    "pistol": Weapon(MAG_SIZE, SHOT_COOLDOWN, RELOAD_TIME, 10, SHOT_RANGE, spread=0.035, bloom=0.03, bloom_max=0.10),
+    "mp9": Weapon(30, 0.09, 2.4, 6, 750, spread=0.06, bloom=0.025, bloom_max=0.22, push=900),
+    "shotgun": Weapon(5, 0.85, 2.6, 8, 450, spread=0.17, bloom=0.0, bloom_max=0.0, pellets=7, push=700),
+}
+BLOOM_DECAY = 0.35                   # rad/s
+FALLOFF_START = 220.0                # au-delà, les dégâts baissent linéairement...
+FALLOFF_MIN = 0.25                   # ... jusqu'à ce facteur en limite de portée
+
+# Armes au sol : placées au hasard dans les zones d'apparition des humains à chaque manche.
+PICKUP_COUNT = 8
+PICKUP_KINDS = ["mp9", "mp9", "mp9", "shotgun", "shotgun"]
+PICKUP_RADIUS = PLAYER_R + 14
+PICKUP_RESPAWN = 40.0                # s avant qu'une arme ramassée réapparaisse ailleurs
+
+
+def falloff(distance: float, weapon_range: float) -> float:
+    """Facteur de dégâts selon la distance : 1 de près, FALLOFF_MIN en limite de portée."""
+    if distance <= FALLOFF_START:
+        return 1.0
+    k = min(1.0, (distance - FALLOFF_START) / max(1.0, weapon_range - FALLOFF_START))
+    return 1.0 - (1.0 - FALLOFF_MIN) * k
+
 # --- Points de vie des zombies -----------------------------------------------
 ZOMBIE_HP = 300                    # mesuré à 24 bots : à 100 PV le patient zéro était abattu en boucle à la sortie
-BULLET_DAMAGE = 10                 # de sa salle ; à 300, ~4 zombies abattus/manche ; à 500+, plus aucun (30 balles = 5 chargeurs)
+BULLET_DAMAGE = WEAPONS["pistol"].damage   # de sa salle ; à 300, ~4 zombies abattus/manche ; à 500+, plus aucun (30 balles = 5 chargeurs)
 MELEE_DAMAGE = 20                  # 15 coups, mais au contact = risque d'infection
 RESPAWN_TIME = 5.0
 
@@ -279,6 +321,15 @@ class Prop:
 
 
 @dataclass(eq=False)
+class Pickup:
+    id: int
+    kind: str
+    x: float
+    y: float
+    respawn_at: float = 0.0          # > 0 : ramassée, réapparaîtra à cet instant
+
+
+@dataclass(eq=False)
 class BotBrain:
     path: list = field(default_factory=list)
     repath_t: float = 0.0
@@ -307,6 +358,8 @@ class Player:
     shot_cd: float = 0.0
     reload_t: float = 0.0
     ammo: int = MAG_SIZE
+    weapon: str = "pistol"
+    bloom: float = 0.0
     slow_until: float = 0.0
     frozen_until: float = 0.0
     hp: int = ZOMBIE_HP                # n'a de sens que pour un zombie
@@ -347,6 +400,8 @@ class World:
         self._dirty_hp: dict[int, int] = {}       # id meuble -> PV en % (0 = cassé), à envoyer
         self._bot_n = 0
         self._flow: np.ndarray | None = None
+        self.pickups: dict[int, Pickup] = {}
+        self._pickups_dirty = True
         self._flow_at = -1e9
         self.map: MapDef = get_map(self.cfg.map)
         self.walls, self.doors = self.map.walls, self.map.doors
@@ -572,6 +627,7 @@ class World:
             taken.append(pos)
             self._teleport(p, pos)
             p.ammo, p.reload_t, p.shot_cd, p.hit_cd = MAG_SIZE, 0.0, 0.0, 0.0
+            p.weapon, p.bloom = "pistol", 0.0
             p.slow_until = p.frozen_until = p.respawn_until = 0.0
             p.kbx = p.kby = 0.0
 
@@ -597,6 +653,7 @@ class World:
     def _start_round(self) -> None:
         self._reset_props()
         self._respawn_all_as_humans()
+        self._spawn_pickups()
         self.phase, self.timer, self.winner = "play", self.cfg.round_seconds, None
         self._promote_zero(self.rng.choice(list(self.players.values())), first=True)
 
@@ -645,15 +702,17 @@ class World:
         for p in self.players.values():
             p.hit_cd = max(0.0, p.hit_cd - dt)
             p.shot_cd = max(0.0, p.shot_cd - dt)
+            p.bloom = max(0.0, p.bloom - BLOOM_DECAY * dt)
             if p.reload_t > 0:
                 p.reload_t -= dt
                 if p.reload_t <= 0:
-                    p.ammo, p.reload_t = MAG_SIZE, 0.0
+                    p.ammo, p.reload_t = WEAPONS[p.weapon].mag, 0.0
             if p.bot is not None:
                 self._bot_think(p, dt)
         self._physics(dt)
         if self.phase == "play":
             self._infection()
+            self._pickup_logic()
         self._collect_dirty_props()
 
     def _physics(self, dt: float) -> None:
@@ -751,38 +810,95 @@ class World:
                             "y": round(pr.body.position.y, 1)})
 
     def shoot(self, p: Player) -> bool:
+        wpn = WEAPONS[p.weapon]
         if p.role != HUMAN or p.shot_cd > 0 or p.reload_t > 0 or self.now < p.frozen_until:
             return False
         if p.ammo <= 0:
-            p.reload_t = RELOAD_TIME
+            p.reload_t = wpn.reload
             return False
         p.ammo -= 1
-        p.shot_cd = SHOT_COOLDOWN
+        p.shot_cd = wpn.cooldown
         if p.ammo == 0:
-            p.reload_t = RELOAD_TIME
-        ax, ay = math.cos(p.aim), math.sin(p.aim)
+            p.reload_t = wpn.reload
+        spread = wpn.spread + p.bloom
+        p.bloom = min(wpn.bloom_max, p.bloom + wpn.bloom)
+        for _ in range(wpn.pellets):
+            a = p.aim + self.rng.gauss(0.0, spread)
+            self._fire_ray(p, wpn, a)
+        return True
+
+    def _fire_ray(self, p: Player, wpn: Weapon, a: float) -> None:
+        ax, ay = math.cos(a), math.sin(a)
         start = (p.x + ax * (PLAYER_R + 2), p.y + ay * (PLAYER_R + 2))
-        end = (p.x + ax * SHOT_RANGE, p.y + ay * SHOT_RANGE)
+        end = (p.x + ax * wpn.range, p.y + ay * wpn.range)
         info = self.space.segment_query_first(start, end, 0, SHOT_FILTER)
         hit_kind = ""
         if info is not None:
             end = (info.point.x, info.point.y)
+            k = falloff(math.hypot(end[0] - p.x, end[1] - p.y), wpn.range)
             owner = self._owner.get(info.shape)
             if owner and owner[0] == "prop":
-                self.props[owner[1]].body.apply_impulse_at_world_point((ax * SHOT_IMPULSE * MASS_SCALE, ay * SHOT_IMPULSE * MASS_SCALE), info.point)
+                imp = wpn.push * MASS_SCALE * k
+                self.props[owner[1]].body.apply_impulse_at_world_point((ax * imp, ay * imp), info.point)
                 hit_kind = "prop"
             elif owner and owner[0] == "player" and owner[1] in self.players:
                 z = self.players[owner[1]]
-                z.slow_until = self.now + SLOW_TIME
-                z.kbx += ax * SHOT_KNOCKBACK
-                z.kby += ay * SHOT_KNOCKBACK
-                self._damage_zombie(z, BULLET_DAMAGE, p)
+                z.slow_until = self.now + SLOW_TIME * k
+                z.kbx += ax * SHOT_KNOCKBACK * k
+                z.kby += ay * SHOT_KNOCKBACK * k
+                self._damage_zombie(z, max(1, round(wpn.damage * k)), p)
                 hit_kind = "zombie"
             else:
                 hit_kind = "wall"
         self.events.append({"k": "shot", "id": p.id, "x1": round(start[0], 1), "y1": round(start[1], 1),
-                            "x2": round(end[0], 1), "y2": round(end[1], 1), "h": hit_kind})
-        return True
+                            "x2": round(end[0], 1), "y2": round(end[1], 1), "h": hit_kind, "w": p.weapon})
+
+    # ------------------------------------------------------------------ armes
+    def _spawn_pickups(self) -> None:
+        self.pickups.clear()
+        for _ in range(PICKUP_COUNT if self.map.human_areas else 0):
+            x, y = self._spawn_point(self.map.human_areas)
+            pid = next(self._ids)
+            self.pickups[pid] = Pickup(pid, self.rng.choice(PICKUP_KINDS), x, y)
+        self._pickups_dirty = True
+
+    def _pickup_logic(self) -> None:
+        for pk in self.pickups.values():
+            if pk.respawn_at:
+                if self.now >= pk.respawn_at:      # réapparaît ailleurs
+                    pk.x, pk.y = self._spawn_point(self.map.human_areas)
+                    pk.kind, pk.respawn_at = self.rng.choice(PICKUP_KINDS), 0.0
+                    self._pickups_dirty = True
+                continue
+            for p in self.humans():
+                if math.hypot(p.x - pk.x, p.y - pk.y) <= PICKUP_RADIUS:
+                    self.give_weapon(p, pk.kind)
+                    pk.respawn_at = self.now + PICKUP_RESPAWN
+                    self._pickups_dirty = True
+                    self.events.append({"k": "pickup", "id": p.id, "w": pk.kind})
+                    break
+
+    def give_weapon(self, p: Player, kind: str) -> None:
+        p.weapon, p.ammo, p.reload_t, p.bloom = kind, WEAPONS[kind].mag, 0.0, 0.0
+
+    def pickups_list(self) -> list[list]:
+        return [[pk.id, pk.kind, round(pk.x, 1), round(pk.y, 1)] for pk in self.pickups.values() if not pk.respawn_at]
+
+    # ---------------------------------------------------------- aide zombie
+    def zombie_hint(self, p: Player) -> float | None:
+        """Direction (radians) vers l'humain le plus proche PAR LES COULOIRS : la porte à prendre, pas le mur."""
+        humans = self.humans()
+        if p.role != ZOMBIE or not humans:
+            return None
+        field = self._humans_flow()
+        here = self.nav.nearest_free(self.nav.cell_of(p.x, p.y))
+        steps = self.nav.descend(here, field, 3)
+        if steps:
+            tx, ty = self.nav.center(steps[-1])
+        else:                                       # même case ou inatteignable : à vol d'oiseau
+            t = min(humans, key=lambda h: (h.x - p.x) ** 2 + (h.y - p.y) ** 2)
+            tx, ty = t.x, t.y
+        return math.atan2(ty - p.y, tx - p.x)
 
     # -------------------------------------------------------------------- bots
     def _los(self, a: tuple[float, float], b: tuple[float, float], radius: float = PLAYER_R * 0.7) -> bool:
@@ -904,6 +1020,7 @@ class World:
             "walls": [[round(wl.x1, 1), round(wl.y1, 1), round(wl.x2, 1), round(wl.y2, 1), wl.t, wl.style]
                       for wl in self.walls],
             "obstacles": [[ob.kind, ob.x, ob.y, ob.r] for ob in self.map.obstacles],
+            "wp": self.pickups_list(),
             "kinds": {name: [list(part) if part[0] != "poly" else ["poly", [list(pt) for pt in part[1]]]
                              for part in k.parts] for name, k in PROP_KINDS.items()},
             "props": [[pr.id, pr.kind] for pr in self.props.values()],
@@ -915,10 +1032,12 @@ class World:
         }
 
     def me(self, pid: int) -> list:
+        """Infos propres à un joueur : [munitions, rechargement 0/1, arme, cap vers l'humain le plus proche ou null]."""
         p = self.players.get(pid)
         if p is None:
-            return [0, 0]
-        return [p.ammo, 1 if p.reload_t > 0 else 0]
+            return [0, 0, "pistol", None]
+        hint = self.zombie_hint(p)
+        return [p.ammo, 1 if p.reload_t > 0 else 0, p.weapon, None if hint is None else round(hint, 2)]
 
     def snapshot(self) -> dict:
         """État global (identique pour tous les clients) ; consomme événements et props modifiés."""
@@ -938,6 +1057,9 @@ class World:
         if self._dirty_hp:
             snap["ps"] = [[pid, pct] for pid, pct in self._dirty_hp.items()]
             self._dirty_hp = {}
+        if self._pickups_dirty or self.tick % 90 == 0:
+            snap["wp"] = self.pickups_list()
+            self._pickups_dirty = False
         if self.tick % 90 == 0:
             snap["pf"] = self.props_full()
             snap["ps"] = self.props_hp()

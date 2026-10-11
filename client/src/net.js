@@ -5,7 +5,7 @@
 // garde un court historique, et un meuble immobile reste simplement à sa dernière position.
 
 export const INTERP_DELAY = 100; // ms
-export const PROTOCOL = 5;        // doit valoir PROTOCOL_VERSION du serveur (game.py)
+export const PROTOCOL = 6;        // doit valoir PROTOCOL_VERSION du serveur (game.py)
 const TELEPORT = 250;            // au-delà, pas de lissage (réapparition, changement de manche)
 
 export function lerpAngle(a, b, k) {
@@ -67,6 +67,7 @@ export class Net {
     this.areas = [];           // [sol, [[x, y], ...]]
     this.obstacles = [];       // [type, x, y, rayon]
     this.base = 'floor';
+    this.pickups = [];         // armes au sol : [id, type, x, y]
     this.kinds = {};           // type -> formes (envoyées par le serveur)
     this.propInfo = new Map(); // id -> {kind}
     this.props = new Map();    // id -> Track
@@ -74,7 +75,7 @@ export class Net {
     this.players = new Map();  // id -> {tr, role, flags, hp}
     this.names = new Map();
     this.cfg = { round: 300, freeze: 10, min: 2, player_r: 16 };
-    this.meta = { ph: 'wait', tl: 0, w: null, fz: 0, n: [0, 0], me: [0, 0], at: 0 };
+    this.meta = { ph: 'wait', tl: 0, w: null, fz: 0, n: [0, 0], me: [0, 0, 'pistol', null], at: 0 };
   }
 
   on(fn) {
@@ -122,6 +123,7 @@ export class Net {
     this.areas = m.areas ?? [];
     this.obstacles = m.obstacles ?? [];
     this.base = m.base ?? 'floor';
+    this.pickups = m.wp ?? [];
     this.cfg = m.cfg;
     this.kinds = m.kinds ?? {};
     for (const [id, kind] of m.props) {
@@ -141,7 +143,8 @@ export class Net {
 
   _onState(m) {
     const t = performance.now();
-    this.meta = { ph: m.ph, tl: m.tl, w: m.w, fz: m.fz, n: m.n, me: m.me ?? [0, 0], at: t };
+    this.meta = { ph: m.ph, tl: m.tl, w: m.w, fz: m.fz, n: m.n, me: m.me ?? [0, 0, 'pistol', null], at: t };
+    if (m.wp) this.pickups = m.wp;
     if (m.names) this._setNames(m.names);
 
     const seen = new Set();

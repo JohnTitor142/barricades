@@ -41,8 +41,10 @@ def test_welcome_contains_map_and_state_follows():
         assert len(w["ps"]) == len(w["props"]) and all(pct == 100 for _, pct in w["ps"])
         assert w["map"] and len(w["areas"]) >= 6 and w["v"] == PROTOCOL_VERSION
         assert all(len(wl) == 6 for wl in w["walls"])          # x1, y1, x2, y2, épaisseur, style
+        assert "wp" in w                                        # armes au sol dès l'arrivée
         s = recv_until(ws, lambda m: m["t"] == "s")
         assert s["ph"] == "wait" and "me" in s and any(p[0] == w["id"] for p in s["p"])
+        assert len(s["me"]) == 4                                # [munitions, recharge, arme, cap vers l'humain]
 
 
 def test_input_moves_player():
