@@ -121,6 +121,12 @@ export class GameScene extends Phaser.Scene {
       if (info.kind === 'bed') c.add(this.add.rectangle(0, -info.h / 2 + 18, info.w - 20, 24, 0xcfc8b8));
       if (info.kind === 'sofa') c.add(this.add.rectangle(0, -info.h / 2 + 9, info.w - 8, 14, side));
       if (info.kind === 'wardrobe') c.add(this.add.rectangle(0, 0, 3, info.h - 8, 0x000000, 0.6));
+      c.cracks = this.add.graphics();
+      c.add(c.cracks);
+      c.plate = plate;
+      c.info = info;
+      c.pid = id;
+      c.pct = 100;
       this.propObjs.set(id, c);
     }
   }
@@ -138,6 +144,10 @@ export class GameScene extends Phaser.Scene {
     } else if (ev.k === 'hit') {
       sound.hit(ev.x, ev.y, ev.n > 0);
       this.addFx({ k: 'swing', ev, until: now + 150 });
+    } else if (ev.k === 'break') {
+      sound.crash(ev.x, ev.y);
+      const info = net.propInfo.get(ev.id);
+      if (info) this.debris(ev.x, ev.y, info);
     } else if (ev.k === 'infect') {
       this.splat(ev.x, ev.y, 14, 38);
     }
@@ -159,6 +169,50 @@ export class GameScene extends Phaser.Scene {
       g.fillCircle(x + Math.cos(a) * d, y + Math.sin(a) * d, 2 + Math.random() * 5);
     }
     this.blood.draw(g);
+  }
+
+  /** Débris d'un meuble cassé, « cuits » au sol comme le sang (effacés à la manche suivante). */
+  debris(x, y, info) {
+    if (!this.blood) return;
+    const [side, top] = PROP_STYLE[info.kind];
+    const g = this.splatBrush;
+    const spread = Math.max(info.w, info.h) * 0.6;
+    g.clear();
+    for (let i = 0; i < 18; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const d = Math.random() * spread;
+      const s = 3 + Math.random() * 9;
+      g.fillStyle(i % 3 ? side : top, 0.9);
+      g.fillRect(x + Math.cos(a) * d - s / 2, y + Math.sin(a) * d - s / 4, s, s / 2);
+    }
+    this.blood.draw(g);
+  }
+
+  /** Fissures de plus en plus nombreuses quand les PV baissent ; caché une fois cassé. */
+  setPropDamage(obj, pct) {
+    obj.pct = pct;
+    obj.setVisible(pct > 0);
+    const g = obj.cracks;
+    g.clear();
+    obj.plate.setAlpha(0.55 + 0.45 * (pct / 100));
+    if (pct <= 0 || pct >= 100) return;
+    const { w, h } = obj.info;
+    let seed = (obj.pid * 7919 + 1) | 0;          // mêmes fissures pour un même meuble
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+    g.lineStyle(2, 0x0b0806, 0.85);
+    const n = Math.ceil((100 - pct) / 20);
+    for (let i = 0; i < n; i++) {
+      let px = (rnd() - 0.5) * w * 0.8;
+      let py = (rnd() - 0.5) * h * 0.8;
+      g.beginPath();
+      g.moveTo(px, py);
+      for (let k = 0; k < 4; k++) {
+        px = Math.max(-w / 2, Math.min(w / 2, px + (rnd() - 0.5) * w * 0.5));
+        py = Math.max(-h / 2, Math.min(h / 2, py + (rnd() - 0.5) * h * 0.5));
+        g.lineTo(px, py);
+      }
+      g.strokePath();
+    }
   }
 
   clearBlood() {
@@ -204,6 +258,9 @@ export class GameScene extends Phaser.Scene {
     }
 
     for (const [id, obj] of this.propObjs) {
+      const pct = net.propHp.get(id) ?? 100;
+      if (pct !== obj.pct) this.setPropDamage(obj, pct);
+      if (pct <= 0) continue;
       const s = net.props.get(id)?.sample(rt, false);
       if (s) obj.setPosition(s.x, s.y).setRotation(s.a);
     }

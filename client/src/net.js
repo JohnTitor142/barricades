@@ -66,6 +66,7 @@ export class Net {
     this.rooms = [];
     this.propInfo = new Map(); // id -> {kind, w, h}
     this.props = new Map();    // id -> Track
+    this.propHp = new Map();   // id -> PV en % (0 = cassé)
     this.players = new Map();  // id -> {tr, role, flags}
     this.names = new Map();
     this.cfg = { round: 300, freeze: 10, min: 2, player_r: 16 };
@@ -114,6 +115,7 @@ export class Net {
       this.props.set(id, new Track());
     }
     for (const [id, x, y, a] of m.pos) this.props.get(id)?.push(t, x, y, a);
+    for (const [id, pct] of m.ps ?? []) this.propHp.set(id, pct);
     this._setNames(m.names);
     this.session += 1;
     this.ready = true;
@@ -143,6 +145,7 @@ export class Net {
       if (!list) continue;
       for (const [id, x, y, a] of list) this.props.get(id)?.push(t, x, y, a);
     }
+    for (const [id, pct] of m.ps ?? []) this.propHp.set(id, pct);
     for (const ev of m.ev) for (const fn of this.listeners) fn(ev);
   }
 

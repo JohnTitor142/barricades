@@ -9,6 +9,7 @@ Règles
 - Un zombie qui touche un humain l'infecte. Les humains gagnent si le timer
   arrive à zéro, les zombies si plus aucun humain ne reste.
 - Tout le monde peut *frapper* (les objets glissent, les joueurs reculent).
+  Chaque coup abîme le meuble ; à 0 PV il casse (débloque une barricade) et revient à la manche suivante.
 - Les humains ont un pistolet : un tir pousse les objets et ralentit les zombies.
 - Le serveur fait autorité sur tout (positions, tirs, infection).
 """
@@ -80,6 +81,8 @@ PROP_KINDS: dict[str, tuple[float, float, float]] = {
     "bed": (100, 170, 50),
     "wardrobe": (80, 46, 60),
 }
+# PV des meubles, en nombre de COUPS (les balles poussent mais n'abîment pas).
+PROP_HP: dict[str, int] = {"chair": 3, "crate": 4, "table": 6, "sofa": 8, "bed": 10, "wardrobe": 12}
 ROOM_PROPS = ["chair"] * 5 + ["crate"] * 3 + ["table"] * 2 + ["sofa", "bed"] + ["wardrobe"] * 2
 ROOM_PROPS_AREA = 800 * 800        # ROOM_PROPS meuble une pièce de cette surface ; au prorata pour les autres
 DOOR_CLEARANCE = 150.0             # aucun meuble posé à moins de ça d'une porte au début d'une manche
@@ -181,6 +184,13 @@ class Prop:
     shape: pymunk.Poly
     home: tuple[float, float, float]
     sent: tuple[float, float, float]
+    max_hp: int = 1
+    hp: int = 1
+    broken: bool = False
+
+    @property
+    def hp_pct(self) -> int:
+        return round(100 * self.hp / self.max_hp)
 
 
 @dataclass(eq=False)
@@ -244,6 +254,7 @@ class World:
         self.events: list[dict] = []
         self.roster_dirty = True
         self._dirty_props: list[list] = []
+        self._dirty_hp: dict[int, int] = {}       # id meuble -> PV en % (0 = cassé), à envoyer
         self._bot_n = 0
         self.map: MapDef = get_map(self.cfg.map)
         self.walls, self.doors = self.map.walls, self.map.doors
@@ -300,13 +311,20 @@ class World:
         shape.filter = ShapeFilter(categories=CAT_PROP)
         self.space.add(body, shape)
         pid = next(self._ids)
-        prop = Prop(pid, kind, w, h, body, shape, (x, y, angle), (x, y, angle))
+        prop = Prop(pid, kind, w, h, body, shape, (x, y, angle), (x, y, angle), PROP_HP[kind], PROP_HP[kind])
         self.props[pid] = prop
         self._owner[shape] = ("prop", pid)
         return prop
 
     def _reset_props(self) -> None:
         for pr in self.props.values():
+            if pr.broken:
+                self.space.add(pr.body, pr.shape)
+                self._owner[pr.shape] = ("prop", pr.id)
+                pr.broken = False
+            if pr.hp != pr.max_hp:
+                pr.hp = pr.max_hp
+                self._dirty_hp[pr.id] = 100
             x, y, a = pr.home
             pr.body.position = (x, y)
             pr.body.angle = a
@@ -574,8 +592,9 @@ class World:
                 kind, eid = owner
                 touched += 1
                 if kind == "prop":
-                    body = self.props[eid].body
-                    body.apply_impulse_at_world_point((ax * HIT_IMPULSE * MASS_SCALE, ay * HIT_IMPULSE * MASS_SCALE), info.point)
+                    pr = self.props[eid]
+                    pr.body.apply_impulse_at_world_point((ax * HIT_IMPULSE * MASS_SCALE, ay * HIT_IMPULSE * MASS_SCALE), info.point)
+                    self._damage_prop(pr)
                 elif eid in self.players:
                     other = self.players[eid]
                     other.kbx += ax * KNOCKBACK
@@ -583,6 +602,17 @@ class World:
         self.events.append({"k": "hit", "id": p.id, "x": round(p.x + ax * 28, 1),
                             "y": round(p.y + ay * 28, 1), "a": round(p.aim, 2), "n": touched})
         return True
+
+    def _damage_prop(self, pr: Prop) -> None:
+        pr.hp -= 1
+        self._dirty_hp[pr.id] = pr.hp_pct
+        if pr.hp > 0:
+            return
+        pr.broken = True
+        self.space.remove(pr.body, pr.shape)
+        self._owner.pop(pr.shape, None)
+        self.events.append({"k": "break", "id": pr.id, "x": round(pr.body.position.x, 1),
+                            "y": round(pr.body.position.y, 1)})
 
     def shoot(self, p: Player) -> bool:
         if p.role != HUMAN or p.shot_cd > 0 or p.reload_t > 0 or self.now < p.frozen_until:
@@ -677,6 +707,8 @@ class World:
     # --------------------------------------------------------------- snapshots
     def _collect_dirty_props(self) -> None:
         for pr in self.props.values():
+            if pr.broken:
+                continue
             x, y, a = pr.body.position.x, pr.body.position.y, pr.body.angle
             sx, sy, sa = pr.sent
             if abs(x - sx) > 0.2 or abs(y - sy) > 0.2 or abs(a - sa) > 0.004:
@@ -686,6 +718,9 @@ class World:
     def props_full(self) -> list[list]:
         return [[pr.id, round(pr.body.position.x, 1), round(pr.body.position.y, 1), round(pr.body.angle, 3)]
                 for pr in self.props.values()]
+
+    def props_hp(self) -> list[list[int]]:
+        return [[pr.id, pr.hp_pct] for pr in self.props.values()]
 
     def names(self) -> dict[int, str]:
         return {p.id: p.name for p in self.players.values()}
@@ -697,6 +732,7 @@ class World:
             "walls": [[round(v, 1) for v in w] for w in self.walls],
             "props": [[pr.id, pr.kind, pr.w, pr.h] for pr in self.props.values()],
             "pos": self.props_full(),
+            "ps": self.props_hp(),
             "names": self.names(),
             "cfg": {"round": self.cfg.round_seconds, "freeze": self.cfg.freeze_seconds,
                     "min": self.cfg.min_players, "player_r": PLAYER_R},
@@ -721,8 +757,12 @@ class World:
             "n": [len(self.humans()), len(self.zombies())],
             "p": players, "pr": self._dirty_props, "ev": self.events,
         }
+        if self._dirty_hp:
+            snap["ps"] = [[pid, pct] for pid, pct in self._dirty_hp.items()]
+            self._dirty_hp = {}
         if self.tick % 90 == 0:
             snap["pf"] = self.props_full()
+            snap["ps"] = self.props_hp()
         if self.roster_dirty:
             snap["names"] = self.names()
             self.roster_dirty = False

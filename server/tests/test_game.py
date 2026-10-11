@@ -1,13 +1,16 @@
 import math
 
+import pymunk
 import pytest
 
 from app.game import (
     CAT_ZOMBIE,
+    HIT_COOLDOWN,
     HUMAN,
     INFECT_DIST,
     MAG_SIZE,
     PLAYER_R,
+    PROP_HP,
     ZOMBIE,
     Settings,
     World,
@@ -152,6 +155,63 @@ def test_hit_event_counts_what_was_touched():
     w.events.clear()
     assert w.hit(p)
     assert w.events[-1]["n"] == 1
+
+
+def hit_n(w, p, n):
+    """Frappe n fois en respectant le temps de recharge."""
+    for _ in range(n):
+        run(w, HIT_COOLDOWN + DT)
+        assert w.hit(p)
+
+
+def test_prop_breaks_after_enough_hits_and_frees_the_way():
+    w = empty_world()
+    pr = w._add_prop("chair", 400, 400, 0)
+    p = w.add_player("A")
+    w._teleport(p, (360, 400))
+    p.aim = 0
+    for i in range(PROP_HP["chair"]):
+        assert not pr.broken and pr.hp == PROP_HP["chair"] - i
+        pr.body.position, pr.body.velocity = (400, 400), (0, 0)   # une chaise vole loin : on la remet devant
+        w.space.reindex_shapes_for_body(pr.body)
+        hit_n(w, p, 1)
+    assert pr.broken and pr.shape not in w.space.shapes
+    assert any(e["k"] == "break" and e["id"] == pr.id for e in w.snapshot()["ev"])
+
+
+def test_heavy_props_need_more_hits():
+    assert PROP_HP["wardrobe"] > PROP_HP["table"] > PROP_HP["chair"]
+
+
+def test_broken_props_come_back_next_round_and_client_is_told():
+    w = World(Settings(intermission_seconds=0.5, end_seconds=0.5, round_seconds=1), seed=7)
+    start_round(w)
+    pr = next(iter(w.props.values()))
+    for _ in range(pr.max_hp):
+        w._damage_prop(pr)
+    assert pr.broken
+    snap = w.snapshot()
+    assert [pr.id, 0] in snap["ps"]
+    run(w, 3)                                     # fin de manche puis entracte : remise en place
+    assert not pr.broken and pr.hp == pr.max_hp and pr.shape in w.space.shapes
+    assert any(pid == pr.id and pct == 100 for pid, pct in w.snapshot()["ps"])
+
+
+def test_zombie_bot_breaks_through_a_barricade():
+    """Fin du « Mexican standoff » : une armoire bloque la porte, le bot zombie finit par la casser."""
+    w = empty_world(intermission_seconds=999)     # pas de nouvelle manche (qui remettrait le lit)
+    dx, dy = w.doors[0]                            # porte verticale du manoir en (800, 360)
+    wall = w._add_prop("bed", dx, dy, 0)          # lit 100 x 170 : couvre toute la porte
+    wall.body.body_type = pymunk.Body.KINEMATIC   # coincé : impossible de le pousser, il faut le casser
+    h = w.add_player("H")
+    z = w.add_player("Z", bot=True)
+    w._set_role(z, ZOMBIE)
+    w._teleport(z, (dx - 150, dy))
+    w._teleport(h, (dx + 200, dy))
+    h.frozen_until = 1e9                          # l'humain ne bouge pas
+    run(w, 25)
+    assert wall.broken
+    assert math.hypot(z.x - h.x, z.y - h.y) < 120
 
 
 def test_hit_cooldown():

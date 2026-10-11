@@ -225,6 +225,19 @@ class Sound {
     this.boom(dest, t, 160 * r, 45, 0.16, 0.9);                  // souffle grave
   }
 
+  /** Meuble qui se brise en (x, y). */
+  crash(x, y) {
+    const dest = this.out(x, y, 0.9);
+    if (!dest) return;
+    const t = this.ctx.currentTime;
+    this.noiseBurst(dest, t, 0.45, 'lowpass', 1800, 0.8, 0.7);   // fracas
+    this.boom(dest, t, 90, 35, 0.35, 1);                          // masse qui tombe
+    for (let i = 0; i < 4; i++) {                                  // éclats de bois
+      const ti = t + 0.03 + Math.random() * 0.2;
+      this.boom(dest, ti, 300 + Math.random() * 400, 150, 0.05, 0.3, 'triangle');
+    }
+  }
+
   /** Coup porté en (x, y) ; impact = un meuble ou un joueur a été touché. */
   hit(x, y, impact) {
     const dest = this.out(x, y, 0.7);
