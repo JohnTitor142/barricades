@@ -60,10 +60,13 @@ export class GameScene extends Phaser.Scene {
     this.makeDarkness();
 
     this.input.mouse?.disableContextMenu();
-    this.input.keyboard.disableGlobalCapture(); // ne pas bloquer la saisie du nom
-    this.keys = this.input.keyboard.addKeys('Z,Q,S,D,W,A,UP,DOWN,LEFT,RIGHT');
+    // Aucune touche « capturée » : sinon Phaser empêche le navigateur de les transmettre à la case du nom
+    // (Z, Q, S, D, W, A, E, R et Espace devenaient impossibles à taper).
+    this.input.keyboard.disableGlobalCapture();
+    this.keys = this.input.keyboard.addKeys('Z,Q,S,D,W,A,UP,DOWN,LEFT,RIGHT', false);
     this.input.keyboard.on('keydown-SPACE', () => net.sendAct('hit'));
     this.input.keyboard.on('keydown-E', () => net.sendAct('rage'));         // sort de l'alpha
+    this.input.keyboard.on('keydown-R', () => net.sendAct('reload'));       // recharger quand on veut
     this.input.on('pointerdown', (p) => {
       // Clic droit : dash pour un zombie (son clic gauche frappe déjà), frappe pour un humain.
       if (p.rightButtonDown()) net.sendAct(net.players.get(net.id)?.role === HUMAN ? 'hit' : 'dash');

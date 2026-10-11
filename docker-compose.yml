@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     environment:
       ROUND_SECONDS: ${ROUND_SECONDS:-150}
-      FREEZE_SECONDS: ${FREEZE_SECONDS:-10}
+      FREEZE_SECONDS: ${FREEZE_SECONDS:-30}
       FILL_TO: ${FILL_TO:-0}
     expose:
       - "8000"

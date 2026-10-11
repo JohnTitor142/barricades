@@ -63,10 +63,10 @@ RAGE_TIME = 5.0                    # sort de l'alpha : les balles ne le ralentis
 RAGE_COOLDOWN = 30.0
 
 # --- Bots ------------------------------------------------------------------
-NAV_CELL = 40.0
-NAV_MARGIN = PLAYER_R + 10         # une case de navigation est « libre » si un joueur y tient avec de la marge
+NAV_CELL = 20.0                    # cases fines : les passages étroits (clôture / bord de carte) restent praticables
+NAV_MARGIN = PLAYER_R + 2          # une case de navigation est « libre » si un joueur y tient
 FLOW_REFRESH = 0.25                # s entre deux recalculs de la carte des distances vers les humains
-FLOW_LOOKAHEAD = 8                 # cases suivies le long de la pente pour couper les virages (si la voie est libre)
+FLOW_LOOKAHEAD = 16                # cases suivies le long de la pente pour couper les virages (si la voie est libre)
 UNREACHABLE = int(np.iinfo(np.int32).max)
 BOT_REPLAN = (0.1, 0.2)            # s entre deux choix de cap d'un bot (aléatoire : on étale les calculs entre bots)
 
@@ -304,7 +304,7 @@ class NavGrid:
 @dataclass
 class Settings:
     round_seconds: float = 150.0
-    freeze_seconds: float = 10.0
+    freeze_seconds: float = 30.0      # le patient zéro reste figé : temps pour se barricader
     intermission_seconds: float = 8.0
     end_seconds: float = 8.0
     min_players: int = 2
@@ -611,6 +611,8 @@ class World:
             self.hit(p)
         elif kind == "shoot":
             self.shoot(p)
+        elif kind == "reload":
+            self.reload(p)
         elif kind == "dash":
             self.dash(p)
         elif kind == "rage":
@@ -885,6 +887,14 @@ class World:
         for _ in range(wpn.pellets):
             a = p.aim + self.rng.gauss(0.0, spread)
             self._fire_ray(p, wpn, a)
+        return True
+
+    def reload(self, p: Player) -> bool:
+        """Recharger quand on veut (touche R) : seulement si le chargeur n'est pas plein."""
+        wpn = WEAPONS[p.weapon]
+        if p.role != HUMAN or p.reload_t > 0 or p.ammo >= wpn.mag:
+            return False
+        p.reload_t = wpn.reload
         return True
 
     def _fire_ray(self, p: Player, wpn: Weapon, a: float) -> None:

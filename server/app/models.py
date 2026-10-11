@@ -18,7 +18,7 @@ class InputMsg(BaseModel):
 
 class ActMsg(BaseModel):
     t: Literal["act"]
-    k: Literal["shoot", "hit", "dash", "rage"]
+    k: Literal["shoot", "hit", "dash", "rage", "reload"]
 
 
 ClientMsg = Annotated[JoinMsg | InputMsg | ActMsg, Field(discriminator="t")]

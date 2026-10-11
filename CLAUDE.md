@@ -8,7 +8,7 @@ Ingénieur QA qui connaît Python mais débute en développement de jeu : expliq
 jeu (tick, interpolation, autorité serveur…) quand elles apparaissent, et avance par petites étapes testables.
 
 ## Le jeu
-- Salon de 24 joueurs max, manche de 2 min 30 (réglable). Un patient zéro tiré au hasard, figé 10 s au début.
+- Salon de 24 joueurs max, manche de 2 min 30 (réglable). Un patient zéro tiré au hasard, figé 30 s au début.
 - Un zombie qui touche un humain l'infecte. Humains : survivre jusqu'au chrono. Zombies : infecter tout le monde.
 - Cœur du jeu : ~75-90 meubles physiques de formes variées (cercles, polygones, formes composées : piano à queue,
   canapé d'angle…, catalogue PROP_KINDS dans game.py) qu'on déplace en les FRAPPANT pour barricader les portes.
@@ -69,7 +69,7 @@ Réglages serveur par variables d'environnement : `ROUND_SECONDS`, `FREEZE_SECON
 - Ne mets pas de calcul de physique côté client : le client affiche, le serveur décide.
 
 ## État actuel
-- Serveur : 68 tests verts ; entrepôt, 24 joueurs ≈ 1,6 ms/tick (pire tick ~15 ms) ; ~30 Ko/s par client.
+- Serveur : 70 tests verts ; entrepôt, 24 joueurs ≈ 1,6 ms/tick (pire tick ~15 ms) ; ~30 Ko/s par client.
 - Client : rendu vérifié dans le navigateur (capture) ; sang/débris « cuits » dans une RenderTexture.
   Musique + sons synthétisés (Web Audio). En dev, `window.__barricade` = { game, net, sound }.
 - En ligne : https://barricade.212.227.181.202.sslip.io (Coolify, `docker-compose.coolify.yml`, 24 bots).

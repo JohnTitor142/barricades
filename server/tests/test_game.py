@@ -849,6 +849,30 @@ def test_last_player_leaving_mid_round_leaves_no_ghost_events_for_the_next_one()
     assert w.snapshot()["ev"] == []
 
 
+def test_zombie_bot_reaches_humans_hiding_in_narrow_gaps_along_the_map_edge():
+    """Ville : entre la clôture du champ et le bord ouest, il reste ~70 px — assez pour un joueur. Avec une
+    grille trop grossière, le zombie restait collé de l'autre côté de la clôture."""
+    w = bare_world("ville")
+    h = w.add_player("H")
+    z = w.add_player("Z", bot=True)
+    w._set_role(z, ZOMBIE)
+    w._teleport(h, (40, 500))
+    w._teleport(z, (1200, 1750))
+    h.frozen_until = 1e9
+    assert chase(w, z, h, 30)
+
+
+def test_reload_on_demand_only_when_the_magazine_is_not_full():
+    w, h, _ = zombie_line()
+    assert not w.reload(h)                           # chargeur plein
+    h.ammo = 2
+    assert w.reload(h) and not w.reload(h)           # déjà en train de recharger
+    run(w, WEAPONS["pistol"].reload + 0.1)
+    assert h.ammo == WEAPONS["pistol"].mag
+    w.act(h.id, "reload")                            # par le message réseau aussi
+    assert h.reload_t == 0
+
+
 def test_bots_fill_and_leave():
     w = World(Settings(fill_to=8), seed=7)
     p = w.add_player("A")
