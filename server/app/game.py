@@ -9,7 +9,8 @@ Règles
 - Un zombie qui touche un humain l'infecte. Les humains gagnent si le timer
   arrive à zéro, les zombies si plus aucun humain ne reste.
 - Tout le monde peut *frapper* (les objets glissent, les joueurs reculent).
-  Chaque coup abîme le meuble ; à 0 PV il casse (débloque une barricade) et revient à la manche suivante.
+  Les coups de ZOMBIE abîment les meubles (20 à 50 coups) ; à 0 PV le meuble casse (débloque une barricade)
+  et revient à la manche suivante. Les humains et les balles poussent sans abîmer.
 - Les humains ont un pistolet : un tir pousse les objets et ralentit les zombies.
 - Les zombies ont beaucoup de PV : balles et coups des humains finissent par les abattre ;
   ils réapparaissent alors dans leur salle après quelques secondes (invulnérables pendant l'attente).
@@ -17,21 +18,21 @@ Règles
 """
 from __future__ import annotations
 
-import heapq
 import itertools
 import math
 import random
 from dataclasses import dataclass, field
-from typing import ClassVar
 
+import numpy as np
 import pymunk
+import tcod.path
 from pymunk import ShapeFilter
 
 from .maps import MapDef, get_map
 
 TICK_RATE = 30
 # À incrémenter à chaque changement du protocole : un client d'une autre version se recharge tout seul.
-PROTOCOL_VERSION = 3
+PROTOCOL_VERSION = 4
 SUBSTEPS = 2                       # pas de physique par tick (60 Hz)
 
 # --- Monde (les cartes elles-mêmes sont dans maps.py) ----------------------
@@ -54,6 +55,7 @@ NAV_CELL = 40.0
 NAV_MARGIN = PLAYER_R + 10         # une case de navigation est « libre » si un joueur y tient avec de la marge
 FLOW_REFRESH = 0.25                # s entre deux recalculs de la carte des distances vers les humains
 FLOW_LOOKAHEAD = 8                 # cases suivies le long de la pente pour couper les virages (si la voie est libre)
+UNREACHABLE = int(np.iinfo(np.int32).max)
 BOT_REPLAN = (0.1, 0.2)            # s entre deux choix de cap d'un bot (aléatoire : on étale les calculs entre bots)
 
 # --- Frappe (tout le monde) ------------------------------------------------
@@ -72,9 +74,9 @@ RELOAD_TIME = 2.0
 SHOT_KNOCKBACK = 140.0
 
 # --- Points de vie des zombies -----------------------------------------------
-ZOMBIE_HP = 100
-BULLET_DAMAGE = 10                 # ~10 balles (presque 2 chargeurs) pour abattre un zombie
-MELEE_DAMAGE = 20                  # 5 coups, mais au contact = risque d'infection
+ZOMBIE_HP = 300                    # mesuré à 24 bots : à 100 PV le patient zéro était abattu en boucle à la sortie
+BULLET_DAMAGE = 10                 # de sa salle ; à 300, ~4 zombies abattus/manche ; à 500+, plus aucun (30 balles = 5 chargeurs)
+MELEE_DAMAGE = 20                  # 15 coups, mais au contact = risque d'infection
 RESPAWN_TIME = 5.0
 
 HUMAN, ZOMBIE = 0, 1
@@ -89,18 +91,50 @@ WALL_ONLY = ShapeFilter(mask=CAT_WALL)
 # donc les vitesses obtenues (voir HIT_IMPULSE) restent celles d'une masse « nominale ».
 MASS_SCALE = 20.0
 
-# nom -> (largeur, hauteur, masse nominale)
-PROP_KINDS: dict[str, tuple[float, float, float]] = {
-    "chair": (30, 30, 6),
-    "crate": (52, 52, 12),
-    "table": (110, 64, 25),
-    "sofa": (140, 56, 40),
-    "bed": (100, 170, 50),
-    "wardrobe": (80, 46, 60),
+
+
+@dataclass(frozen=True)
+class PropKind:
+    """Un type de meuble : une ou plusieurs formes CONVEXES solidaires (repère local, centre = (0, 0)).
+    ("box", largeur, hauteur, dx, dy) | ("circle", rayon, dx, dy) | ("poly", ((x, y), ...)).
+    hp = nombre de COUPS DE ZOMBIE pour le casser (les humains et les balles poussent sans abîmer)."""
+    parts: tuple
+    mass: float                    # masse « nominale » (voir MASS_SCALE)
+    hp: int
+
+    @property
+    def radius(self) -> float:
+        """Rayon du cercle englobant (placement en début de manche)."""
+        r = 0.0
+        for part in self.parts:
+            if part[0] == "box":
+                _, w, h, dx, dy = part
+                r = max(r, math.hypot(abs(dx) + w / 2, abs(dy) + h / 2))
+            elif part[0] == "circle":
+                _, rad, dx, dy = part
+                r = max(r, math.hypot(dx, dy) + rad)
+            else:
+                r = max(r, *(math.hypot(x, y) for x, y in part[1]))
+        return r
+
+
+PROP_KINDS: dict[str, PropKind] = {
+    "chair": PropKind((("box", 30, 30, 0, 0),), 6, 20),
+    "barrel": PropKind((("circle", 22, 0, 0),), 14, 25),
+    "crate": PropKind((("box", 52, 52, 0, 0),), 12, 25),
+    "table": PropKind((("box", 110, 64, 0, 0),), 25, 30),
+    "round_table": PropKind((("circle", 44, 0, 0),), 25, 30),
+    "bookshelf": PropKind((("box", 150, 32, 0, 0),), 35, 35),
+    "sofa_l": PropKind((("box", 150, 50, 0, -30), ("box", 50, 70, 50, 30)), 45, 40),       # canapé d'angle
+    "bed": PropKind((("box", 100, 170, 0, 0),), 50, 45),
+    "wardrobe": PropKind((("box", 80, 46, 0, 0),), 60, 50),
+    "fridge": PropKind((("box", 62, 62, 0, 0),), 55, 50),
+    "piano": PropKind((("box", 140, 60, 0, -45),                                           # piano à queue :
+                       ("poly", ((-70, -15), (70, -15), (45, 60), (-10, 80), (-55, 55)))),   # clavier + caisse
+                      70, 50),
 }
-# PV des meubles, en nombre de COUPS (les balles poussent mais n'abîment pas).
-PROP_HP: dict[str, int] = {"chair": 3, "crate": 4, "table": 6, "sofa": 8, "bed": 10, "wardrobe": 12}
-ROOM_PROPS = ["chair"] * 5 + ["crate"] * 3 + ["table"] * 2 + ["sofa", "bed"] + ["wardrobe"] * 2
+ROOM_PROPS = (["chair"] * 3 + ["barrel"] * 2
+              + ["crate", "table", "round_table", "bookshelf", "sofa_l", "bed", "wardrobe", "fridge", "piano"])
 ROOM_PROPS_AREA = 800 * 800        # ROOM_PROPS meuble une pièce de cette surface ; au prorata pour les autres
 DOOR_CLEARANCE = 150.0             # aucun meuble posé à moins de ça d'une porte au début d'une manche
 
@@ -111,22 +145,26 @@ def clamp(v: float, lo: float, hi: float) -> float:
 
 # --------------------------------------------------------------- navigation
 class NavGrid:
-    """Grille de navigation pour les bots (murs fixes ; les meubles sont franchissables : on les frappe)."""
+    """Grille de navigation des bots, générée automatiquement à partir des murs de la carte (rien à régler à la
+    main pour une nouvelle carte). Les meubles n'y figurent pas : les zombies les cassent. Les calculs de
+    chemin sont délégués à tcod (bibliothèque C de référence pour la navigation sur grille en 2D)."""
 
-    NEIGH: ClassVar[list[tuple[int, int, float]]] = [(1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0),
-             (1, 1, 1.414), (1, -1, 1.414), (-1, 1, 1.414), (-1, -1, 1.414)]
+    CARDINAL, DIAGONAL = 2, 3          # coûts d'un pas droit / en diagonale (≈ 1 : 1,41)
 
     def __init__(self, walls, w: float, h: float, cell: float = NAV_CELL, margin: float = NAV_MARGIN) -> None:
         self.cell = cell
         self.cols, self.rows = int(w // cell), int(h // cell)
-        self.blocked: set[tuple[int, int]] = set()
-        for i in range(self.cols):
-            for j in range(self.rows):
-                cx, cy = (i + 0.5) * cell, (j + 0.5) * cell
-                for wx, wy, ww, wh in walls:
-                    if abs(cx - wx) < ww / 2 + margin and abs(cy - wy) < wh / 2 + margin:
-                        self.blocked.add((i, j))
-                        break
+        cx = (np.arange(self.cols) + 0.5) * cell
+        cy = (np.arange(self.rows) + 0.5) * cell
+        gx, gy = np.meshgrid(cx, cy, indexing="ij")            # tableaux [colonne, ligne]
+        blocked = np.zeros((self.cols, self.rows), dtype=bool)
+        for wx, wy, ww, wh in walls:
+            blocked |= (np.abs(gx - wx) < ww / 2 + margin) & (np.abs(gy - wy) < wh / 2 + margin)
+        self.blocked = blocked
+        self.cost = np.where(blocked, 0, 1).astype(np.int32)    # 0 = infranchissable pour tcod
+
+    def is_blocked(self, c: tuple[int, int]) -> bool:
+        return bool(self.blocked[c])
 
     def cell_of(self, x: float, y: float) -> tuple[int, int]:
         return (int(clamp(x // self.cell, 0, self.cols - 1)), int(clamp(y // self.cell, 0, self.rows - 1)))
@@ -136,106 +174,49 @@ class NavGrid:
 
     def nearest_free(self, c: tuple[int, int], radius: int = 3) -> tuple[int, int]:
         """Case libre la plus proche (un joueur collé à un angle de murs est dans une case « bloquée »)."""
-        if c not in self.blocked:
+        if not self.blocked[c]:
             return c
-        for r in range(1, radius + 1):
-            ring = [(c[0] + dx, c[1] + dy) for dx in range(-r, r + 1) for dy in range(-r, r + 1)
-                    if max(abs(dx), abs(dy)) == r]
-            free = [n for n in ring if n not in self.blocked
-                    and 0 <= n[0] < self.cols and 0 <= n[1] < self.rows]
-            if free:
-                return min(free, key=lambda n: (n[0] - c[0]) ** 2 + (n[1] - c[1]) ** 2)
-        return c
+        i0, i1 = max(0, c[0] - radius), min(self.cols, c[0] + radius + 1)
+        j0, j1 = max(0, c[1] - radius), min(self.rows, c[1] + radius + 1)
+        free = np.argwhere(~self.blocked[i0:i1, j0:j1])
+        if not len(free):
+            return c
+        d = (free[:, 0] + i0 - c[0]) ** 2 + (free[:, 1] + j0 - c[1]) ** 2
+        i, j = free[int(np.argmin(d))]
+        return (int(i + i0), int(j + j0))
 
-    def _steps(self, cur: tuple[int, int]):
-        """Cases voisines franchissables (pas de coupe d'angle entre deux cases bloquées)."""
-        for dx, dy, step in self.NEIGH:
-            nb = (cur[0] + dx, cur[1] + dy)
-            if not (0 <= nb[0] < self.cols and 0 <= nb[1] < self.rows) or nb in self.blocked:
-                continue
-            if dx and dy and ((cur[0] + dx, cur[1]) in self.blocked or (cur[0], cur[1] + dy) in self.blocked):
-                continue
-            yield nb, step
-
-    def distance_field(self, sources: list[tuple[float, float]]) -> dict[tuple[int, int], float]:
-        """Distance (en cases, par les couloirs) de chaque case à la source la plus proche (Dijkstra multi-sources)."""
-        dist: dict[tuple[int, int], float] = {}
-        heap = []
+    def distance_field(self, sources: list[tuple[float, float]]) -> np.ndarray:
+        """Distance (par les couloirs) de chaque case à la source la plus proche ; « infini » si inatteignable."""
+        dist = tcod.path.maxarray((self.cols, self.rows), dtype=np.int32)
         for x, y in sources:
-            c = self.nearest_free(self.cell_of(x, y))
-            if dist.get(c, 1e18) > 0:
-                dist[c] = 0.0
-                heap.append((0.0, c))
-        heapq.heapify(heap)
-        while heap:
-            d, cur = heapq.heappop(heap)
-            if d > dist[cur]:
-                continue
-            for nb, step in self._steps(cur):
-                nd = d + step
-                if nd < dist.get(nb, 1e18):
-                    dist[nb] = nd
-                    heapq.heappush(heap, (nd, nb))
+            dist[self.nearest_free(self.cell_of(x, y))] = 0
+        tcod.path.dijkstra2d(dist, self.cost, self.CARDINAL, self.DIAGONAL, out=dist)
         return dist
 
-    def downhill(self, c: tuple[int, int], field: dict[tuple[int, int], float]) -> tuple[int, int] | None:
-        """Case voisine la plus proche d'une source, ou None si on est déjà au fond (ou hors de portée)."""
-        here = field.get(c)
-        if here is None:
-            return None
-        best = min(self._steps(c), key=lambda ns: field.get(ns[0], 1e18), default=None)
-        if best is None or field.get(best[0], 1e18) >= here:
-            return None
-        return best[0]
+    def reachable(self, c: tuple[int, int], dist: np.ndarray) -> bool:
+        return bool(dist[c] < UNREACHABLE)
+
+    def descend(self, c: tuple[int, int], dist: np.ndarray, n: int) -> list[tuple[int, int]]:
+        """Les n prochaines cases en descendant la carte des distances (vers la source la plus proche)."""
+        if not self.reachable(c, dist):
+            return []
+        steps = tcod.path.hillclimb2d(dist, c, True, True)[1:n + 1]
+        return [(int(i), int(j)) for i, j in steps]
 
     def path(self, start: tuple[float, float], goal: tuple[float, float]) -> list[tuple[float, float]]:
-        s, g = self.cell_of(*start), self.nearest_free(self.cell_of(*goal))
-        if s == g:
-            return [goal]
-
-        def h(c):
-            dx, dy = abs(c[0] - g[0]), abs(c[1] - g[1])
-            return (dx + dy) + (1.414 - 2) * min(dx, dy)
-
-        cost = {s: 0.0}
-        came: dict[tuple[int, int], tuple[int, int] | None] = {s: None}
-        heap = [(h(s), 0.0, s)]
-        while heap:
-            _, c, cur = heapq.heappop(heap)
-            if cur == g:
-                break
-            if c > cost[cur]:
-                continue
-            for dx, dy, step in self.NEIGH:
-                nb = (cur[0] + dx, cur[1] + dy)
-                if not (0 <= nb[0] < self.cols and 0 <= nb[1] < self.rows):
-                    continue
-                if nb in self.blocked and nb != g:
-                    continue
-                if dx and dy and ((cur[0] + dx, cur[1]) in self.blocked or (cur[0], cur[1] + dy) in self.blocked):
-                    continue
-                nc = c + step
-                if nc < cost.get(nb, 1e18):
-                    cost[nb] = nc
-                    came[nb] = cur
-                    heapq.heappush(heap, (nc + h(nb), nc, nb))
-        if g not in came:
+        """Chemin complet (points du monde) de start à goal, [] si impossible."""
+        dist = self.distance_field([goal])
+        cells = self.descend(self.nearest_free(self.cell_of(*start)), dist, self.cols * self.rows)
+        if not cells and self.nearest_free(self.cell_of(*start)) != self.nearest_free(self.cell_of(*goal)):
             return []
-        cells, cur = [], g
-        while cur is not None and cur != s:
-            cells.append(cur)
-            cur = came[cur]
-        cells.reverse()
         pts = [self.center(c) for c in cells]
-        if pts:
-            pts[-1] = goal
-        return pts
+        return [*pts[:-1], goal] if pts else [goal]
 
 
 # ------------------------------------------------------------------ entités
 @dataclass
 class Settings:
-    round_seconds: float = 300.0
+    round_seconds: float = 150.0
     freeze_seconds: float = 10.0
     intermission_seconds: float = 8.0
     end_seconds: float = 8.0
@@ -249,10 +230,8 @@ class Settings:
 class Prop:
     id: int
     kind: str
-    w: float
-    h: float
     body: pymunk.Body
-    shape: pymunk.Poly
+    shapes: list[pymunk.Shape]
     home: tuple[float, float, float]
     sent: tuple[float, float, float]
     max_hp: int = 1
@@ -332,7 +311,7 @@ class World:
         self._dirty_props: list[list] = []
         self._dirty_hp: dict[int, int] = {}       # id meuble -> PV en % (0 = cassé), à envoyer
         self._bot_n = 0
-        self._flow: dict[tuple[int, int], float] = {}
+        self._flow: np.ndarray | None = None
         self._flow_at = -1e9
         self.map: MapDef = get_map(self.cfg.map)
         self.walls, self.doors = self.map.walls, self.map.doors
@@ -358,8 +337,7 @@ class World:
                 n //= 3                    # la salle des zombies n'a pas besoin d'être meublée
             kinds = ROOM_PROPS if n >= len(ROOM_PROPS) else rng.sample(ROOM_PROPS, n)
             for kind in kinds:
-                w, h, _mass = PROP_KINDS[kind]
-                rad = math.hypot(w, h) / 2
+                rad = PROP_KINDS[kind].radius
                 for _ in range(60):
                     x = rng.uniform(x0 + 70 + rad, x1 - 70 - rad)
                     y = rng.uniform(y0 + 70 + rad, y1 - 70 - rad)
@@ -379,26 +357,42 @@ class World:
                 self._add_prop(kind, x, y, angle)
 
     def _add_prop(self, kind: str, x: float, y: float, angle: float) -> Prop:
-        w, h, mass = PROP_KINDS[kind]
-        body = pymunk.Body(mass * MASS_SCALE, pymunk.moment_for_box(mass * MASS_SCALE, (w, h)))
+        k = PROP_KINDS[kind]
+        body = pymunk.Body()               # masse et inertie calculées par pymunk à partir des formes
         body.position = (x, y)
         body.angle = angle
-        shape = pymunk.Poly.create_box(body, (w, h))
-        shape.friction = 0.6
-        shape.elasticity = 0.1
-        shape.filter = ShapeFilter(categories=CAT_PROP)
-        self.space.add(body, shape)
+        shapes: list[pymunk.Shape] = []
+        for part in k.parts:
+            if part[0] == "box":
+                _, w, h, dx, dy = part
+                shape = pymunk.Poly(body, [(dx - w / 2, dy - h / 2), (dx + w / 2, dy - h / 2),
+                                           (dx + w / 2, dy + h / 2), (dx - w / 2, dy + h / 2)])
+            elif part[0] == "circle":
+                _, r, dx, dy = part
+                shape = pymunk.Circle(body, r, (dx, dy))
+            else:
+                shape = pymunk.Poly(body, list(part[1]))
+            shape.friction = 0.6
+            shape.elasticity = 0.1
+            shape.filter = ShapeFilter(categories=CAT_PROP)
+            shapes.append(shape)
+        density = k.mass * MASS_SCALE / sum(sh.area for sh in shapes)
+        for sh in shapes:
+            sh.density = density
+        self.space.add(body, *shapes)
         pid = next(self._ids)
-        prop = Prop(pid, kind, w, h, body, shape, (x, y, angle), (x, y, angle), PROP_HP[kind], PROP_HP[kind])
+        prop = Prop(pid, kind, body, shapes, (x, y, angle), (x, y, angle), k.hp, k.hp)
         self.props[pid] = prop
-        self._owner[shape] = ("prop", pid)
+        for sh in shapes:
+            self._owner[sh] = ("prop", pid)
         return prop
 
     def _reset_props(self) -> None:
         for pr in self.props.values():
             if pr.broken:
-                self.space.add(pr.body, pr.shape)
-                self._owner[pr.shape] = ("prop", pr.id)
+                self.space.add(pr.body, *pr.shapes)
+                for sh in pr.shapes:
+                    self._owner[sh] = ("prop", pr.id)
                 pr.broken = False
             if pr.hp != pr.max_hp:
                 pr.hp = pr.max_hp
@@ -657,23 +651,21 @@ class World:
             return False
         p.hit_cd = HIT_COOLDOWN
         ax, ay = math.cos(p.aim), math.sin(p.aim)
-        seen: set[pymunk.Shape] = set()
+        seen: set[tuple[str, int]] = set()    # par entité : un meuble à plusieurs formes n'est frappé qu'une fois
         touched = 0
         for d in (HIT_REACH * 0.5, HIT_REACH):
             for info in self.space.point_query((p.x + ax * d, p.y + ay * d), HIT_RADIUS, HIT_FILTER):
-                shape = info.shape
-                if shape is p.shape or shape in seen:
+                owner = self._owner.get(info.shape)
+                if info.shape is p.shape or owner is None or owner in seen:
                     continue
-                seen.add(shape)
-                owner = self._owner.get(shape)
-                if owner is None:
-                    continue
+                seen.add(owner)
                 kind, eid = owner
                 touched += 1
                 if kind == "prop":
                     pr = self.props[eid]
                     pr.body.apply_impulse_at_world_point((ax * HIT_IMPULSE * MASS_SCALE, ay * HIT_IMPULSE * MASS_SCALE), info.point)
-                    self._damage_prop(pr)
+                    if p.role == ZOMBIE:       # seuls les zombies abîment les barricades
+                        self._damage_prop(pr)
                 elif eid in self.players:
                     other = self.players[eid]
                     other.kbx += ax * KNOCKBACK
@@ -703,8 +695,9 @@ class World:
         if pr.hp > 0:
             return
         pr.broken = True
-        self.space.remove(pr.body, pr.shape)
-        self._owner.pop(pr.shape, None)
+        self.space.remove(pr.body, *pr.shapes)
+        for sh in pr.shapes:
+            self._owner.pop(sh, None)
         self.events.append({"k": "break", "id": pr.id, "x": round(pr.body.position.x, 1),
                             "y": round(pr.body.position.y, 1)})
 
@@ -758,7 +751,7 @@ class World:
                 return False
         return True
 
-    def _humans_flow(self) -> dict[tuple[int, int], float]:
+    def _humans_flow(self) -> np.ndarray:
         """Carte des distances vers l'humain le plus proche, partagée par tous les zombies, rafraîchie 4 fois/s."""
         if self.now - self._flow_at >= FLOW_REFRESH:
             self._flow = self.nav.distance_field([(h.x, h.y) for h in self.humans()])
@@ -770,14 +763,10 @@ class World:
         et on vise la case la plus lointaine encore atteignable en ligne droite pour tout le corps."""
         field = self._humans_flow()
         nav = self.nav
-        c = nav.nearest_free(nav.cell_of(p.x, p.y))
+        here = nav.nearest_free(nav.cell_of(p.x, p.y))
         lookahead = 1 if self.now < p.bot.careful_until else FLOW_LOOKAHEAD
         best = None
-        for _ in range(lookahead):
-            nxt = nav.downhill(c, field)
-            if nxt is None:
-                break
-            c = nxt
+        for c in nav.descend(here, field, lookahead):
             pt = nav.center(c)
             if best is None or self._body_clear((p.x, p.y), pt):
                 best = pt
@@ -863,7 +852,9 @@ class World:
             "v": PROTOCOL_VERSION, "map": self.map.name, "w": self.map.w, "h": self.map.h,
             "rooms": [list(r) for r in self.map.rooms],
             "walls": [[round(v, 1) for v in w] for w in self.walls],
-            "props": [[pr.id, pr.kind, pr.w, pr.h] for pr in self.props.values()],
+            "kinds": {name: [list(part) if part[0] != "poly" else ["poly", [list(pt) for pt in part[1]]]
+                             for part in k.parts] for name, k in PROP_KINDS.items()},
+            "props": [[pr.id, pr.kind] for pr in self.props.values()],
             "pos": self.props_full(),
             "ps": self.props_hp(),
             "names": self.names(),

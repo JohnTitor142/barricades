@@ -22,7 +22,7 @@ SEND_TIMEOUT = 0.5
 def settings_from_env() -> Settings:
     env = os.environ.get
     return Settings(
-        round_seconds=float(env("ROUND_SECONDS", 300)),
+        round_seconds=float(env("ROUND_SECONDS", 150)),
         freeze_seconds=float(env("FREEZE_SECONDS", 10)),
         intermission_seconds=float(env("INTERMISSION_SECONDS", 8)),
         min_players=int(env("MIN_PLAYERS", 2)),

@@ -1,16 +1,8 @@
 import Phaser from 'phaser';
 import { sound } from '../audio.js';
+import { drawKind, kindBounds, randomPointIn, styleOf } from '../furniture.js';
 import { INTERP_DELAY, net } from '../net.js';
 
-// Couleurs « dessus de meuble » : [flanc, plateau]
-const PROP_STYLE = {
-  chair: [0x6b4f36, 0x8a6a4a],
-  crate: [0x7d6030, 0x9c7a3c],
-  table: [0x55402b, 0x75573a],
-  sofa: [0x5e2b2b, 0x7a3b3b],
-  bed: [0x39475f, 0x52668a],
-  wardrobe: [0x2a1f19, 0x44342b],
-};
 const ROOM_TINTS = [0x15120f, 0x12150f, 0x161214, 0x11131a, 0x171410, 0x131315];
 const HUMAN = 0;
 const ZOMBIE_BODY = 0x7ea35c;
@@ -112,18 +104,25 @@ export class GameScene extends Phaser.Scene {
       f.strokeRect(cx - ww / 2, cy - hh / 2, ww, hh);
     }
 
+    // Une texture par type de meuble (dessinée une fois), partagée par tous les meubles de ce type.
+    const brush = this.make.graphics({}, false);
+    const tex = {};
+    for (const [kind, parts] of Object.entries(net.kinds)) {
+      const key = `prop_${kind}`;
+      if (this.textures.exists(key)) this.textures.remove(key);
+      tex[kind] = drawKind(brush, kind, parts);
+      brush.generateTexture(key, tex[kind].w, tex[kind].h);
+    }
+    brush.destroy();
+
     for (const [id, info] of net.propInfo) {
-      const [side, top] = PROP_STYLE[info.kind];
+      const t = tex[info.kind];
+      if (!t) continue;
       const c = this.add.container(0, 0).setDepth(2);
-      const base = this.add.rectangle(0, 0, info.w, info.h, side).setStrokeStyle(2, 0x000000, 0.7);
-      const plate = this.add.rectangle(0, 0, info.w - 8, info.h - 8, top);
-      c.add([base, plate]);
-      if (info.kind === 'bed') c.add(this.add.rectangle(0, -info.h / 2 + 18, info.w - 20, 24, 0xcfc8b8));
-      if (info.kind === 'sofa') c.add(this.add.rectangle(0, -info.h / 2 + 9, info.w - 8, 14, side));
-      if (info.kind === 'wardrobe') c.add(this.add.rectangle(0, 0, 3, info.h - 8, 0x000000, 0.6));
+      c.img = this.add.image(0, 0, `prop_${info.kind}`).setOrigin(t.originX, t.originY);
       c.cracks = this.add.graphics();
-      c.add(c.cracks);
-      c.plate = plate;
+      c.add([c.img, c.cracks]);
+      c.parts = net.kinds[info.kind];
       c.info = info;
       c.pid = id;
       c.pct = 100;
@@ -177,9 +176,10 @@ export class GameScene extends Phaser.Scene {
   /** Débris d'un meuble cassé, « cuits » au sol comme le sang (effacés à la manche suivante). */
   debris(x, y, info) {
     if (!this.blood) return;
-    const [side, top] = PROP_STYLE[info.kind];
+    const [side, top] = styleOf(info.kind);
     const g = this.splatBrush;
-    const spread = Math.max(info.w, info.h) * 0.6;
+    const [x0, y0, x1, y1] = kindBounds(net.kinds[info.kind] ?? [['box', 40, 40, 0, 0]]);
+    const spread = Math.max(x1 - x0, y1 - y0) * 0.6;
     g.clear();
     for (let i = 0; i < 18; i++) {
       const a = Math.random() * Math.PI * 2;
@@ -197,21 +197,21 @@ export class GameScene extends Phaser.Scene {
     obj.setVisible(pct > 0);
     const g = obj.cracks;
     g.clear();
-    obj.plate.setAlpha(0.55 + 0.45 * (pct / 100));
+    const shade = Math.round(255 * (0.55 + 0.45 * (pct / 100)));   // de plus en plus sombre
+    obj.img.setTint(shade * 0x010101);
     if (pct <= 0 || pct >= 100) return;
-    const { w, h } = obj.info;
     let seed = (obj.pid * 7919 + 1) | 0;          // mêmes fissures pour un même meuble
     const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
     g.lineStyle(2, 0x0b0806, 0.85);
     const n = Math.ceil((100 - pct) / 20);
     for (let i = 0; i < n; i++) {
-      let px = (rnd() - 0.5) * w * 0.8;
-      let py = (rnd() - 0.5) * h * 0.8;
       g.beginPath();
+      let [px, py] = randomPointIn(obj.parts, rnd);  // départ toujours DANS la forme (rond, L, piano...)
       g.moveTo(px, py);
-      for (let k = 0; k < 4; k++) {
-        px = Math.max(-w / 2, Math.min(w / 2, px + (rnd() - 0.5) * w * 0.5));
-        py = Math.max(-h / 2, Math.min(h / 2, py + (rnd() - 0.5) * h * 0.5));
+      for (let k = 0; k < 3; k++) {
+        const [tx, ty] = randomPointIn(obj.parts, rnd);
+        px += (tx - px) * 0.45;                    // segments brisés qui restent dans la forme (convexe)
+        py += (ty - py) * 0.45;
         g.lineTo(px, py);
       }
       g.strokePath();

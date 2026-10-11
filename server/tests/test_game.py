@@ -13,7 +13,7 @@ from app.game import (
     MAG_SIZE,
     MELEE_DAMAGE,
     PLAYER_R,
-    PROP_HP,
+    PROP_KINDS,
     RESPAWN_TIME,
     ZOMBIE,
     ZOMBIE_HP,
@@ -29,7 +29,7 @@ def empty_world(**kw) -> World:
     """Monde sans meubles : pour isoler une règle."""
     w = World(Settings(**kw), seed=7)
     for pr in list(w.props.values()):
-        w.space.remove(pr.body, pr.shape)
+        w.space.remove(pr.body, *pr.shapes)
     w.props.clear()
     return w
 
@@ -96,7 +96,7 @@ def test_zombie_bot_crosses_the_long_map():
     """Sur l'entrepôt, un bot zombie part de sa salle (à gauche) et rejoint un humain dans la salle finale."""
     w = World(Settings(map="entrepot", fill_to=0, intermission_seconds=999), seed=3)   # pas de manche : rôles figés
     for pr in list(w.props.values()):          # sans meubles : on teste la navigation, pas la casse
-        w.space.remove(pr.body, pr.shape)
+        w.space.remove(pr.body, *pr.shapes)
     w.props.clear()
     h = w.add_player("H")
     z = w.add_player("Z", bot=True)
@@ -169,23 +169,62 @@ def hit_n(w, p, n):
         assert w.hit(p)
 
 
-def test_prop_breaks_after_enough_hits_and_frees_the_way():
+def test_zombie_hits_break_a_prop_and_free_the_way():
     w = empty_world()
     pr = w._add_prop("chair", 400, 400, 0)
-    p = w.add_player("A")
-    w._teleport(p, (360, 400))
-    p.aim = 0
-    for i in range(PROP_HP["chair"]):
-        assert not pr.broken and pr.hp == PROP_HP["chair"] - i
+    z = w.add_player("Z")
+    w._set_role(z, ZOMBIE)
+    w._teleport(z, (360, 400))
+    z.aim = 0
+    hp = PROP_KINDS["chair"].hp
+    for i in range(hp):
+        assert not pr.broken and pr.hp == hp - i
         pr.body.position, pr.body.velocity = (400, 400), (0, 0)   # une chaise vole loin : on la remet devant
         w.space.reindex_shapes_for_body(pr.body)
-        hit_n(w, p, 1)
-    assert pr.broken and pr.shape not in w.space.shapes
+        hit_n(w, z, 1)
+    assert pr.broken and not set(pr.shapes) & set(w.space.shapes)
     assert any(e["k"] == "break" and e["id"] == pr.id for e in w.snapshot()["ev"])
 
 
-def test_heavy_props_need_more_hits():
-    assert PROP_HP["wardrobe"] > PROP_HP["table"] > PROP_HP["chair"]
+def test_humans_push_props_but_never_damage_them():
+    w = empty_world()
+    pr = w._add_prop("wardrobe", 400, 400, 0)
+    h = w.add_player("H")
+    w._teleport(h, (330, 400))
+    h.aim = 0
+    hit_n(w, h, 3)
+    assert pr.hp == pr.max_hp and pr.body.position.x > 400
+
+
+def test_props_take_20_to_50_zombie_hits_heavier_ones_more():
+    hps = {k: v.hp for k, v in PROP_KINDS.items()}
+    assert all(20 <= hp <= 50 for hp in hps.values())
+    assert hps["piano"] > hps["table"] > hps["chair"]
+
+
+def test_multi_part_prop_is_one_body_and_takes_one_hit_per_blow():
+    """Piano à queue (clavier + caisse) : deux formes, un seul corps, un seul coup compté par frappe."""
+    w = empty_world()
+    pr = w._add_prop("piano", 400, 400, 0)
+    assert len(pr.shapes) == 2 and all(sh.body is pr.body for sh in pr.shapes)
+    z = w.add_player("Z")
+    w._set_role(z, ZOMBIE)
+    w._teleport(z, (400, 330))                     # au-dessus de la jonction clavier / caisse
+    z.aim = math.pi / 2
+    assert w.hit(z)
+    assert pr.hp == pr.max_hp - 1
+
+
+def test_round_props_roll_and_block_like_the_others():
+    w = empty_world()
+    barrel = w._add_prop("barrel", 400, 400, 0)
+    p = w.add_player("A")
+    w._teleport(p, (330, 400))
+    w.set_input(p.id, 1, 0, 0)
+    for _ in range(int(2 / DT)):
+        w.step(DT)                                  # léger : il glisse devant nous, mais on ne le traverse jamais
+        bx, by = barrel.body.position
+        assert math.hypot(p.x - bx, p.y - by) > 22 + PLAYER_R - 4    # (tolérance de contact pymunk)
 
 
 def test_broken_props_come_back_next_round_and_client_is_told():
@@ -198,7 +237,7 @@ def test_broken_props_come_back_next_round_and_client_is_told():
     snap = w.snapshot()
     assert [pr.id, 0] in snap["ps"]
     run(w, 3)                                     # fin de manche puis entracte : remise en place
-    assert not pr.broken and pr.hp == pr.max_hp and pr.shape in w.space.shapes
+    assert not pr.broken and pr.hp == pr.max_hp and pr.shapes[0] in w.space.shapes
     assert any(pid == pr.id and pct == 100 for pid, pct in w.snapshot()["ps"])
 
 
@@ -214,7 +253,8 @@ def test_zombie_bot_breaks_through_a_barricade():
     w._teleport(z, (dx - 150, dy))
     w._teleport(h, (dx + 200, dy))
     h.frozen_until = 1e9                          # l'humain ne bouge pas
-    run(w, 25)
+    wall.hp = 6                                   # vrai lit : 45 coups ; on raccourcit (après l'arrivée des joueurs,
+    run(w, 25)                                    # qui remet les meubles à neuf) : c'est le mécanisme qu'on teste
     assert wall.broken
     assert math.hypot(z.x - h.x, z.y - h.y) < 120
 
@@ -286,7 +326,7 @@ def zombie_target(w, x=500, y=400):
 
 
 def test_bullets_eventually_kill_a_zombie_who_respawns_in_his_room():
-    w = empty_world()
+    w = empty_world(intermission_seconds=999)      # ~20 s de tir : pas de nouvelle manche (qui changerait les rôles)
     h, z = zombie_target(w)
     shots = 0
     while not any(e["k"] == "kill" for e in w.events):
@@ -295,7 +335,7 @@ def test_bullets_eventually_kill_a_zombie_who_respawns_in_his_room():
         if w.shoot(h):
             shots += 1
         run(w, 0.4)
-        assert shots <= 20
+        assert shots <= 2 * ZOMBIE_HP / BULLET_DAMAGE
     assert shots == math.ceil(ZOMBIE_HP / BULLET_DAMAGE)
     x0, y0, x1, y1 = w.map.rooms[w.map.zombie_room]
     assert x0 <= z.x <= x1 and y0 <= z.y <= y1 and z.hp == ZOMBIE_HP
@@ -499,14 +539,14 @@ def test_zombie_bot_finds_a_human_in_another_room():
 def test_path_reaches_a_player_wedged_in_a_wall_corner():
     """Joueur collé à l'angle de deux murs (sa case de navigation est « bloquée ») : on trouve quand même."""
     w = empty_world()
-    assert w.nav.cell_of(832, 831) in w.nav.blocked     # coin des murs x=800 / y=800 du manoir
+    assert w.nav.is_blocked(w.nav.cell_of(832, 831))    # coin des murs x=800 / y=800 du manoir
     assert w.nav.path((1300, 300), (832, 831))
 
 
 def bare_world(name):
     w = World(Settings(map=name, intermission_seconds=999), seed=7)
     for pr in list(w.props.values()):
-        w.space.remove(pr.body, pr.shape)
+        w.space.remove(pr.body, *pr.shapes)
     w.props.clear()
     return w
 
@@ -567,6 +607,15 @@ def test_distance_field_is_shared_and_refreshed_at_most_4_times_per_second(monke
     monkeypatch.setattr(w.nav, "distance_field", lambda src: calls.append(1) or real(src))
     run(w, 2)
     assert 0 < len(calls) <= 2 / FLOW_REFRESH + 1
+
+
+def test_full_room_of_24_bots_still_lets_real_players_in():
+    w = World(Settings(fill_to=24), seed=7)
+    w.add_player("Moi")
+    assert len(w.players) == 24 and w.real_count == 1
+    assert w.can_join()
+    w.add_player("Ami")                            # un bot lui cède sa place
+    assert len(w.players) == 24 and w.real_count == 2
 
 
 def test_bots_fill_and_leave():

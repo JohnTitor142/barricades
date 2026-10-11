@@ -8,9 +8,9 @@ services:
     build: ./server
     restart: unless-stopped
     environment:
-      ROUND_SECONDS: ${ROUND_SECONDS:-300}
+      ROUND_SECONDS: ${ROUND_SECONDS:-150}      # 2 min 30
       FREEZE_SECONDS: ${FREEZE_SECONDS:-10}
-      FILL_TO: ${FILL_TO:-8}          # bots pour qu'on puisse tester seul la démo
+      FILL_TO: ${FILL_TO:-24}         # 24 bots : salon plein (ils cèdent leur place aux vrais joueurs)
     expose:
       - "8000"
     healthcheck:

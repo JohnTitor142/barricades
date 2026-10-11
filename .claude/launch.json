@@ -4,7 +4,7 @@
     {
       "name": "server",
       "runtimeExecutable": "cmd",
-      "runtimeArgs": ["/c", "cd server && set FILL_TO=8&& .venv\\Scripts\\python.exe -m uvicorn app.main:app --port 8000"],
+      "runtimeArgs": ["/c", "cd server && set FILL_TO=24&& .venv\\Scripts\\python.exe -m uvicorn app.main:app --port 8000"],
       "port": 8000
     },
     {

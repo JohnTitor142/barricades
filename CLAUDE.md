@@ -8,17 +8,19 @@ Ingénieur QA qui connaît Python mais débute en développement de jeu : expliq
 jeu (tick, interpolation, autorité serveur…) quand elles apparaissent, et avance par petites étapes testables.
 
 ## Le jeu
-- Salon de 24 joueurs max, manche de 5 min (réglable). Un patient zéro tiré au hasard, figé 10 s au début.
+- Salon de 24 joueurs max, manche de 2 min 30 (réglable). Un patient zéro tiré au hasard, figé 10 s au début.
 - Un zombie qui touche un humain l'infecte. Humains : survivre jusqu'au chrono. Zombies : infecter tout le monde.
-- Cœur du jeu : ~85 meubles physiques qu'on déplace en les FRAPPANT pour barricader les portes ; chaque coup
-  les abîme (PV en nombre de coups) et ils cassent, ce qui débloque les situations figées.
+- Cœur du jeu : ~75-90 meubles physiques de formes variées (cercles, polygones, formes composées : piano à queue,
+  canapé d'angle…, catalogue PROP_KINDS dans game.py) qu'on déplace en les FRAPPANT pour barricader les portes.
+  Seuls les coups de ZOMBIE les abîment (20 à 50 coups) ; cassés, ils débloquent les situations figées.
 - Humains : pistolet (6 balles) qui pousse les meubles et ralentit les zombies. Pas de tir ami.
-- Zombies : 100 PV ; balles et coups des humains les abattent, ils réapparaissent 5 s après dans leur salle.
+- Zombies : 300 PV (30 balles) ; balles et coups des humains les abattent, ils réapparaissent 5 s après dans leur salle.
 - Ambiance sombre / gore (Walking Dead) ; limite de 24 joueurs.
 
 ## Architecture
 - `server/` : Python 3.12, FastAPI + WebSocket, physique **pymunk**. État en mémoire, UN seul worker.
   - `app/maps.py` : cartes = données (murs, portes, piliers, pièces) : `entrepot` (défaut), `manoir`.
+  - Navigation des bots : `tcod` (Dijkstra multi-sources + descente de pente) sur une grille générée depuis les murs.
   - `app/game.py` : toute la logique (physique, manches, infection, tir, bots, snapshots). **Aucun I/O** :
     reste pur et testable. Constantes de gameplay en tête de fichier.
   - `app/main.py` : WebSocket, boucle à tick fixe 30 Hz (physique 60 Hz), limitation de débit.
@@ -63,11 +65,11 @@ Réglages serveur par variables d'environnement : `ROUND_SECONDS`, `FREEZE_SECON
 - Ne mets pas de calcul de physique côté client : le client affiche, le serveur décide.
 
 ## État actuel
-- Serveur : 44 tests verts ; entrepôt, 24 joueurs ≈ 1,6 ms/tick (pire tick ~15 ms) ; ~30 Ko/s par client.
+- Serveur : 51 tests verts ; entrepôt, 24 joueurs ≈ 1,6 ms/tick (pire tick ~15 ms) ; ~30 Ko/s par client.
 - Client : rendu vérifié dans le navigateur (capture) ; sang/débris « cuits » dans une RenderTexture.
   Musique + sons synthétisés (Web Audio). En dev, `window.__barricade` = { game, net, sound }.
-- En ligne : https://barricade.212.227.181.202.sslip.io (Coolify, `docker-compose.coolify.yml`).
-  Mise à jour = `git push` puis Redeploy dans Coolify.
+- En ligne : https://barricade.212.227.181.202.sslip.io (Coolify, `docker-compose.coolify.yml`, 24 bots).
+  Mise à jour = `git push` sur main : GitHub Actions teste puis déploie (`.github/workflows/ci.yml`).
 
 ## Limites connues / pistes (par ordre d'intérêt)
 1. Jouer et équilibrer : vitesses, force des coups (`HIT_IMPULSE`), masses des meubles, munitions, durée du gel.

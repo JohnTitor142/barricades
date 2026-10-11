@@ -3,7 +3,7 @@ services:
     build: ./server
     restart: unless-stopped
     environment:
-      ROUND_SECONDS: ${ROUND_SECONDS:-300}
+      ROUND_SECONDS: ${ROUND_SECONDS:-150}
       FREEZE_SECONDS: ${FREEZE_SECONDS:-10}
       FILL_TO: ${FILL_TO:-0}
     expose:
