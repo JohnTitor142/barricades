@@ -646,6 +646,20 @@ def test_full_room_of_24_bots_still_lets_real_players_in():
     assert len(w.players) == 24 and w.real_count == 2
 
 
+def test_last_player_leaving_mid_round_leaves_no_ghost_events_for_the_next_one():
+    """Le dernier vrai joueur part en pleine manche : les bots s'en vont sans désigner de patient zéro
+    fantôme, et le joueur suivant ne reçoit aucun événement périmé."""
+    w = World(Settings(fill_to=8, intermission_seconds=0.5, freeze_seconds=0), seed=7)
+    me = w.add_player("Moi")
+    run(w, 1)
+    assert w.phase == "play"
+    w.snapshot()
+    w.remove_player(me.id)
+    assert not w.players and not any(e["k"] == "zero" for e in w.events)
+    w.add_player("Suivant")
+    assert w.snapshot()["ev"] == []
+
+
 def test_bots_fill_and_leave():
     w = World(Settings(fill_to=8), seed=7)
     p = w.add_player("A")

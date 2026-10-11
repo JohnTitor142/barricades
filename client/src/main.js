@@ -4,14 +4,23 @@ import { sound } from './audio.js';
 import { net } from './net.js';
 import { GameScene } from './scenes/GameScene.js';
 
-const game = new Phaser.Game({
-  type: Phaser.AUTO,
-  parent: 'game',
-  backgroundColor: '#030403',
-  scale: { mode: Phaser.Scale.RESIZE, width: window.innerWidth, height: window.innerHeight },
-  scene: [GameScene],
-});
-if (import.meta.env.DEV) window.__barricade = { game, net, sound }; // inspection depuis la console (F12)
+// Phaser plante au démarrage si la fenêtre fait 0 x 0 (onglet ouvert en arrière-plan, iframe masquée) :
+// on attend d'avoir une vraie taille.
+function startGame() {
+  if (!window.innerWidth || !window.innerHeight) {
+    window.addEventListener('resize', startGame, { once: true });
+    return;
+  }
+  const game = new Phaser.Game({
+    type: Phaser.AUTO,
+    parent: 'game',
+    backgroundColor: '#030403',
+    scale: { mode: Phaser.Scale.RESIZE, width: window.innerWidth, height: window.innerHeight },
+    scene: [GameScene],
+  });
+  if (import.meta.env.DEV) window.__barricade = { game, net, sound }; // inspection depuis la console (F12)
+}
+startGame();
 
 const $ = (id) => document.getElementById(id);
 const menu = $('menu');

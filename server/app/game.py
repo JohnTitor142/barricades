@@ -468,6 +468,7 @@ class World:
     def add_player(self, name: str, bot: bool = False) -> Player:
         if not self.players and not bot:
             self._enter_wait()
+            self.events, self._dirty_hp = [], {}   # rien de périmé (serveur resté vide) pour le premier arrivant
         pid = next(self._ids)
         clean = "".join(ch for ch in name if ch.isprintable()).strip()[:16]
         if bot:
@@ -504,7 +505,8 @@ class World:
         self.space.remove(p.body, p.shape, p.ctrl, p.pivot)
         self._owner.pop(p.shape, None)
         self.roster_dirty = True
-        if self.phase == "play" and not self.zombies() and self.humans():
+        # Plus de zombie : un humain le devient — sauf si plus aucun vrai joueur (les bots vont tous partir).
+        if self.phase == "play" and not self.zombies() and self.humans() and self.real_count:
             self._promote_zero(self.rng.choice(self.humans()))
         if p.bot is None:
             self.sync_bots()

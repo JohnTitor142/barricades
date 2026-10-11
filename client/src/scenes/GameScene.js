@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { sound } from '../audio.js';
 import { drawKind, kindBounds, randomPointIn, styleOf } from '../furniture.js';
+import { Minimap, minimapDots } from '../minimap.js';
 import { INTERP_DELAY, net } from '../net.js';
 
 // Sols, murs et obstacles par type (les cartes viennent du serveur ; un type inconnu reste lisible).
@@ -46,6 +47,7 @@ export class GameScene extends Phaser.Scene {
 
     this.cameras.main.setBackgroundColor('#030403');
     this.floorChunks = [];
+    this.minimap = new Minimap(document.getElementById('minimap'), window.innerWidth < 700 ? 130 : 220);
     // Le sang est « cuit » dans une texture : chaque tache est dessinée une seule fois,
     // puis la texture s'affiche d'un bloc. Le coût par image ne dépend plus du nombre de taches.
     this.blood = null;
@@ -152,6 +154,8 @@ export class GameScene extends Phaser.Scene {
       }
     }
     f.destroy();
+    const mapH = this.minimap.build(net);
+    document.getElementById('feed').style.top = `${mapH + 26}px`;   // le fil d'événements passe sous la mini-carte
 
     // Une texture par type de meuble (dessinée une fois), partagée par tous les meubles de ce type.
     const brush = this.make.graphics({}, false);
@@ -323,6 +327,7 @@ export class GameScene extends Phaser.Scene {
     if (time - this.lastHud > 100) {
       this.lastHud = time;
       this.updateHud(meEntry);
+      this.updateMinimap(rt);
     }
   }
 
@@ -448,6 +453,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ------------------------------------------------------------ interface
+  updateMinimap(rt) {
+    const players = new Map();
+    for (const [id, e] of net.players) players.set(id, { role: e.role, flags: e.flags, pos: e.tr.sample(rt, true) });
+    this.minimap.draw(minimapDots(players, net.id));
+  }
+
   updateHud(meEntry) {
     const h = this.hud;
     const { ph, w, n, me } = net.meta;
