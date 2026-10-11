@@ -22,6 +22,22 @@ export const PROP_STYLE = {
   pew: [0x4a3220, 0x6a4a2e],
   dumpster: [0x1e3a24, 0x2c5434],
   car: [0x1a1a1e, 0x5a1e1e],
+  armchair: [0x5a2e3a, 0x7a4050],
+  coffin: [0x2a1a10, 0x4a2e1c],
+  oval_table: [0x55402b, 0x75573a],
+  hex_table: [0x4a3a26, 0x6a5236],
+  corner_cabinet: [0x3a2a1e, 0x5a4030],
+  desk_l: [0x4a3826, 0x6a5236],
+  sofa_u: [0x2e3a5a, 0x40507a],
+  washing_machine: [0xa0a5a0, 0xd0d5cc],
+  tv_stand: [0x222224, 0x34343a],
+  plant_pot: [0x6a3a20, 0x2a5a24],
+  drum_kit: [0x6a1616, 0xc8c0b0],
+  log_pile: [0x5a3a1e, 0x7a5230],
+  tractor: [0x1e4a1e, 0x2e6a2a],
+  altar: [0x6a6862, 0x8a8880],
+  metal_shelf: [0x4a4e52, 0x6a7076],
+  safe: [0x2a2e33, 0x3e444a],
 };
 const DEFAULT_STYLE = [0x4a4a4a, 0x6a6a6a];
 export const styleOf = (kind) => PROP_STYLE[kind] ?? DEFAULT_STYLE;
@@ -187,6 +203,51 @@ function details(g, kind, parts, ox, oy) {
     g.fillRect(ox - w * 0.32, oy - h / 2 + 10, w * 0.12, h - 20);
     g.fillStyle(0x6e2626, 1);
     g.fillRect(ox - w * 0.18, oy - h / 2 + 10, w * 0.28, h - 20);
+  } else if (kind === 'washing_machine') {
+    g.lineStyle(3, 0x6a706a, 1);                   // hublot
+    g.strokeCircle(ox, oy + 4, 18);
+    g.fillStyle(0x3a4a55, 1);
+    g.fillCircle(ox, oy + 4, 13);
+  } else if (kind === 'coffin') {
+    g.fillStyle(0x8a7a5a, 1);                      // croix sur le couvercle
+    g.fillRect(ox - 3, oy - 40, 6, 52);
+    g.fillRect(ox - 14, oy - 26, 28, 6);
+  } else if (kind === 'plant_pot') {
+    g.fillStyle(0x3d7a32, 1);                      // feuillage
+    for (let i = 0; i < 5; i++) g.fillCircle(ox + Math.cos(i * 1.26) * 8, oy + Math.sin(i * 1.26) * 8, 7);
+  } else if (kind === 'tv_stand') {
+    const [, w] = p0;
+    g.fillStyle(0x0a0a0c, 1);                      // écran posé dessus
+    g.fillRect(ox - w * 0.3, oy - 5, w * 0.6, 8);
+  } else if (kind === 'safe') {
+    g.lineStyle(3, 0x8a8f96, 1);                   // cadran
+    g.strokeCircle(ox, oy, 11);
+    g.fillStyle(0x8a8f96, 1);
+    g.fillRect(ox + 14, oy - 8, 4, 16);
+  } else if (kind === 'tractor') {
+    g.fillStyle(0x111111, 1);                      // roues + capot jaune
+    for (const p of parts.slice(1)) g.fillRect(ox + p[3] - p[1] / 2 + 2, oy + p[4] - p[2] / 2 + 2, p[1] - 4, p[2] - 4);
+    g.fillStyle(0xb39a20, 1);
+    g.fillRect(ox + 40, oy - 20, 26, 40);
+  } else if (kind === 'metal_shelf') {
+    const [, w, h] = p0;
+    g.lineStyle(2, 0x2a2e32, 1);
+    for (let x = -w / 2 + 40; x < w / 2; x += 40) g.lineBetween(ox + x, oy - h / 2 + 3, ox + x, oy + h / 2 - 3);
+  } else if (kind === 'log_pile') {
+    g.lineStyle(2, 0x3a2410, 1);                   // cernes au bout des bûches
+    for (const p of parts.slice(1)) g.strokeCircle(ox + p[2], oy + p[3], p[1] * 0.55);
+    g.lineBetween(ox - 60, oy - 8, ox + 60, oy - 8);
+    g.lineBetween(ox - 60, oy + 8, ox + 60, oy + 8);
+  } else if (kind === 'altar') {
+    const [, w, h] = p0;
+    g.fillStyle(0x6a1a1a, 1);                      // nappe rouge
+    g.fillRect(ox - w / 2 + 10, oy - h / 2 + 6, w - 20, 12);
+  } else if (kind === 'drum_kit') {
+    g.lineStyle(2, 0x6a1616, 1);
+    for (const p of parts) g.strokeCircle(ox + p[2], oy + p[3], p[1] * 0.75);
+  } else if (kind === 'armchair' || kind === 'sofa_u') {
+    g.fillStyle(side, 1);                          // coussins séparés
+    g.fillRect(ox - 2, oy - 6, 4, 26);
   } else if (kind === 'piano') {
     const [, w, h, dx, dy] = p0;                   // clavier : bande blanche + touches noires côté avant
     const x0 = ox + dx - w / 2 + 6;

@@ -48,7 +48,7 @@ Coordonnées en pixels du monde, origine en haut à gauche, x vers la droite, y 
 | `spawn` | `human` (apparition des humains, au moins une zone), `zombie` (patient zéro et réapparitions, au moins une) |
 | `style` (murs) | brick, wood, stone, concrete, fence, iron, hedge |
 | `kind` (obstacles) | tree, rock, well, silo, pillar, pump (cercles de rayon `r`), grave (bloc `size`, `angle`) |
-| `kind` (meubles) | chair, barrel, crate, table, round_table, bookshelf, sofa_l, bed, wardrobe, fridge, piano, stove, counter, bathtub, hay_bale, pew, dumpster, car |
+| `kind` (meubles) | chair, barrel, crate, table, round_table, bookshelf, sofa_l, bed, wardrobe, fridge, piano, stove, counter, bathtub, hay_bale, pew, dumpster, car, armchair, coffin, oval_table, hex_table, corner_cabinet, desk_l, sofa_u, washing_machine, tv_stand, plant_pot, drum_kit, log_pile, tractor, altar, metal_shelf, safe |
 
 Les thèmes et les meubles sont définis dans `app/game.py` (`THEMES`, `PROP_KINDS`).
 

@@ -10,9 +10,10 @@ jeu (tick, interpolation, autorité serveur…) quand elles apparaissent, et ava
 ## Le jeu
 - Salon de 24 joueurs max, manche de 2 min 30 (réglable). Un patient zéro tiré au hasard, figé 30 s au début.
 - Un zombie qui touche un humain l'infecte. Humains : survivre jusqu'au chrono. Zombies : infecter tout le monde.
-- Cœur du jeu : ~75-90 meubles physiques de formes variées (cercles, polygones, formes composées : piano à queue,
-  canapé d'angle…, catalogue PROP_KINDS dans game.py) qu'on déplace en les FRAPPANT pour barricader les portes.
-  Seuls les coups de ZOMBIE les abîment (20 à 50 coups) ; cassés, ils débloquent les situations figées.
+- Cœur du jeu : ~90 meubles physiques de 34 types aux formes variées (cercles, polygones, formes composées : piano à
+  queue, canapé en U, bureau en L, batterie, tracteur… ; catalogue PROP_KINDS dans game.py) qu'on déplace en les
+  FRAPPANT pour barricader les portes. Seuls les coups de ZOMBIE les abîment (30 à 150 coups), et un zombie pousse
+  4x moins fort qu'un humain (ZOMBIE_PUSH) : une barricade se casse, elle ne se déblaie pas.
 - Humains : pistolet (6 balles) ; MP9 et fusil à pompe à ramasser au sol (8 par manche). Tirs imprécis
   (dispersion + « spray » qui grandit en rafale), dégâts réduits avec la distance. Pas de tir ami.
 - Zombies : 300 PV (30 balles), abattus ils réapparaissent 5 s après dans leur salle. Dash au clic droit (10 s).
@@ -69,7 +70,7 @@ Réglages serveur par variables d'environnement : `ROUND_SECONDS`, `FREEZE_SECON
 - Ne mets pas de calcul de physique côté client : le client affiche, le serveur décide.
 
 ## État actuel
-- Serveur : 70 tests verts ; entrepôt, 24 joueurs ≈ 1,6 ms/tick (pire tick ~15 ms) ; ~30 Ko/s par client.
+- Serveur : 105 tests verts ; entrepôt, 24 joueurs ≈ 1,6 ms/tick (pire tick ~15 ms) ; ~30 Ko/s par client.
 - Client : rendu vérifié dans le navigateur (capture) ; sang/débris « cuits » dans une RenderTexture.
   Musique + sons synthétisés (Web Audio). En dev, `window.__barricade` = { game, net, sound }.
 - En ligne : https://barricade.212.227.181.202.sslip.io (Coolify, `docker-compose.coolify.yml`, 24 bots).

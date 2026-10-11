@@ -238,10 +238,36 @@ def test_humans_push_props_but_never_damage_them():
     assert pr.hp == pr.max_hp and pr.body.position.x > 400
 
 
-def test_props_take_20_to_50_zombie_hits_heavier_ones_more():
+def test_props_are_durable_heavier_ones_more():
     hps = {k: v.hp for k, v in PROP_KINDS.items()}
-    assert all(20 <= hp <= 50 for hp in hps.values())
-    assert hps["piano"] > hps["table"] > hps["chair"]
+    assert all(30 <= hp <= 150 for hp in hps.values())
+    assert hps["piano"] > hps["table"] > hps["chair"] and hps["safe"] > hps["piano"]
+
+
+def test_zombies_push_furniture_much_less_than_humans():
+    """Une barricade doit se CASSER, pas se déblayer : le même coup pousse 4x moins venant d'un zombie."""
+    moved = {}
+    for role in (HUMAN, ZOMBIE):
+        w = empty_world()
+        pr = w._add_prop("table", 400, 400, 0)
+        p = w.add_player("A")
+        w._set_role(p, role)
+        w._teleport(p, (320, 400))
+        p.aim = 0
+        assert w.hit(p)
+        run(w, 2)
+        moved[role] = pr.body.position.x - 400
+    assert moved[ZOMBIE] < moved[HUMAN] / 3
+
+
+@pytest.mark.parametrize("kind", sorted(PROP_KINDS))
+def test_every_furniture_kind_builds_as_one_solid_body(kind):
+    """Formes composées (U, L, batterie, tracteur...) : un seul corps, masse = masse nominale."""
+    w = empty_world()
+    pr = w._add_prop(kind, 600, 600, 0.3)
+    assert pr.shapes and all(sh.body is pr.body for sh in pr.shapes)
+    assert abs(pr.body.mass - PROP_KINDS[kind].mass * 20) < 1e-6
+    assert w.static_info()["kinds"][kind]
 
 
 def test_multi_part_prop_is_one_body_and_takes_one_hit_per_blow():

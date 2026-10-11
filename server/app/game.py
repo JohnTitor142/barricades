@@ -9,8 +9,9 @@ Règles
 - Un zombie qui touche un humain l'infecte. Les humains gagnent si le timer
   arrive à zéro, les zombies si plus aucun humain ne reste.
 - Tout le monde peut *frapper* (les objets glissent, les joueurs reculent).
-  Les coups de ZOMBIE abîment les meubles (20 à 50 coups) ; à 0 PV le meuble casse (débloque une barricade)
-  et revient à la manche suivante. Les humains et les balles poussent sans abîmer.
+  Les coups de ZOMBIE abîment les meubles (30 à 150 coups) mais les poussent 4x moins fort qu'un humain :
+  une barricade se casse, elle ne se déblaie pas. À 0 PV le meuble casse et revient à la manche suivante.
+  Les humains et les balles poussent sans abîmer.
 - Les humains ont un pistolet : un tir pousse les objets et ralentit les zombies. Des armes (MP9, fusil à
   pompe) traînent au sol et se ramassent en marchant dessus. Les tirs sont imprécis (dispersion aléatoire qui
   augmente quand on enchaîne) et perdent en efficacité avec la distance.
@@ -73,6 +74,7 @@ BOT_REPLAN = (0.1, 0.2)            # s entre deux choix de cap d'un bot (aléato
 # --- Frappe (tout le monde) ------------------------------------------------
 HIT_COOLDOWN = 0.45
 HIT_IMPULSE = 3500.0               # chaise (6) -> ~580 px/s ; armoire (60) -> ~58 px/s
+ZOMBIE_PUSH = 0.25                 # un zombie pousse 4x moins fort : une barricade se CASSE, elle ne se déblaie pas
 HIT_REACH = 62.0
 HIT_RADIUS = 34.0
 KNOCKBACK = 260.0
@@ -171,26 +173,46 @@ class PropKind:
 
 
 PROP_KINDS: dict[str, PropKind] = {
-    "chair": PropKind((("box", 30, 30, 0, 0),), 6, 20),
-    "barrel": PropKind((("circle", 22, 0, 0),), 14, 25),
-    "crate": PropKind((("box", 52, 52, 0, 0),), 12, 25),
-    "table": PropKind((("box", 110, 64, 0, 0),), 25, 30),
-    "round_table": PropKind((("circle", 44, 0, 0),), 25, 30),
-    "bookshelf": PropKind((("box", 150, 32, 0, 0),), 35, 35),
-    "sofa_l": PropKind((("box", 150, 50, 0, -30), ("box", 50, 70, 50, 30)), 45, 40),       # canapé d'angle
-    "bed": PropKind((("box", 100, 170, 0, 0),), 50, 45),
-    "wardrobe": PropKind((("box", 80, 46, 0, 0),), 60, 50),
-    "fridge": PropKind((("box", 62, 62, 0, 0),), 55, 50),
+    "chair": PropKind((("box", 30, 30, 0, 0),), 6, 40),
+    "barrel": PropKind((("circle", 22, 0, 0),), 14, 50),
+    "crate": PropKind((("box", 52, 52, 0, 0),), 12, 50),
+    "table": PropKind((("box", 110, 64, 0, 0),), 25, 60),
+    "round_table": PropKind((("circle", 44, 0, 0),), 25, 60),
+    "bookshelf": PropKind((("box", 150, 32, 0, 0),), 35, 70),
+    "sofa_l": PropKind((("box", 150, 50, 0, -30), ("box", 50, 70, 50, 30)), 45, 80),       # canapé d'angle
+    "bed": PropKind((("box", 100, 170, 0, 0),), 50, 90),
+    "wardrobe": PropKind((("box", 80, 46, 0, 0),), 60, 100),
+    "fridge": PropKind((("box", 62, 62, 0, 0),), 55, 100),
     "piano": PropKind((("box", 140, 60, 0, -45),                                           # piano à queue :
                        ("poly", ((-70, -15), (70, -15), (45, 60), (-10, 80), (-55, 55)))),   # clavier + caisse
-                      70, 50),
-    "stove": PropKind((("box", 60, 60, 0, 0),), 45, 40),
-    "counter": PropKind((("box", 120, 40, 0, 0),), 40, 40),
-    "bathtub": PropKind((("box", 80, 150, 0, 0),), 50, 40),
-    "hay_bale": PropKind((("box", 80, 45, 0, 0),), 20, 25),
-    "pew": PropKind((("box", 170, 34, 0, 0),), 35, 35),                                    # banc d'église
-    "dumpster": PropKind((("box", 120, 70, 0, 0),), 90, 50),
-    "car": PropKind((("box", 190, 86, 0, 0),), 150, 50),
+                      70, 100),
+    "stove": PropKind((("box", 60, 60, 0, 0),), 45, 80),
+    "counter": PropKind((("box", 120, 40, 0, 0),), 40, 80),
+    "bathtub": PropKind((("box", 80, 150, 0, 0),), 50, 80),
+    "hay_bale": PropKind((("box", 80, 45, 0, 0),), 20, 50),
+    "pew": PropKind((("box", 170, 34, 0, 0),), 35, 70),                                    # banc d'église
+    "dumpster": PropKind((("box", 120, 70, 0, 0),), 90, 100),
+    "car": PropKind((("box", 190, 86, 0, 0),), 150, 120),
+    # --- formes variées
+    "armchair": PropKind((("box", 50, 44, 0, 6), ("box", 64, 16, 0, -24),                  # fauteuil : assise,
+                          ("box", 10, 44, -27, 6), ("box", 10, 44, 27, 6)), 25, 60),       # dossier, accoudoirs
+    "coffin": PropKind((("poly", ((-22, -60), (22, -60), (30, -25), (18, 60), (-18, 60), (-30, -25))),), 30, 70),
+    "oval_table": PropKind((("box", 100, 60, 0, 0), ("circle", 30, -50, 0), ("circle", 30, 50, 0)), 30, 70),
+    "hex_table": PropKind((("poly", ((42, 0), (21, 36), (-21, 36), (-42, 0), (-21, -36), (21, -36))),), 25, 60),
+    "corner_cabinet": PropKind((("poly", ((-40, -40), (40, -40), (-40, 40))),), 40, 80),   # meuble d'angle
+    "desk_l": PropKind((("box", 140, 50, 0, -25), ("box", 50, 80, -45, 40)), 45, 90),      # bureau d'angle
+    "sofa_u": PropKind((("box", 160, 40, 0, -40), ("box", 40, 80, -60, 20), ("box", 40, 80, 60, 20)), 60, 100),
+    "washing_machine": PropKind((("box", 60, 60, 0, 0),), 60, 90),
+    "tv_stand": PropKind((("box", 150, 36, 0, 0),), 30, 60),
+    "plant_pot": PropKind((("circle", 18, 0, 0),), 10, 30),
+    "drum_kit": PropKind((("circle", 24, 0, 0), ("circle", 18, -36, -18), ("circle", 18, 36, -18),
+                          ("circle", 14, -30, 26), ("circle", 14, 30, 26)), 25, 60),       # batterie
+    "log_pile": PropKind((("box", 120, 50, 0, 0), ("circle", 25, -60, 0), ("circle", 25, 60, 0)), 50, 80),
+    "tractor": PropKind((("box", 120, 70, 10, 0), ("box", 44, 26, -40, -48), ("box", 44, 26, -40, 48),
+                         ("box", 28, 16, 60, -42), ("box", 28, 16, 60, 42)), 220, 150),
+    "altar": PropKind((("box", 150, 60, 0, 0),), 120, 140),
+    "metal_shelf": PropKind((("box", 160, 36, 0, 0),), 45, 90),
+    "safe": PropKind((("box", 50, 50, 0, 0),), 150, 150),                                  # coffre-fort
 }
 ROOM_PROPS = (["chair"] * 3 + ["barrel"] * 2
               + ["crate", "table", "round_table", "bookshelf", "sofa_l", "bed", "wardrobe", "fridge", "piano"])
@@ -200,21 +222,25 @@ ROOM_PROPS_AREA = 800 * 800        # ROOM_PROPS meuble une pièce de cette surfa
 # (meubles pour 100 000 px², soit une pièce d'environ 316 x 316). « mixed » = ancien mobilier générique.
 THEMES: dict[str, tuple[list[str], float]] = {
     "mixed": (ROOM_PROPS, len(ROOM_PROPS) / ROOM_PROPS_AREA * 1e5),
-    "living": (["sofa_l", "round_table", "bookshelf", "chair", "chair", "piano", "table", "barrel"], 2.0),
-    "dining": (["table", "chair", "chair", "chair", "chair", "bookshelf", "wardrobe"], 2.2),
-    "bedroom": (["bed", "wardrobe", "chair", "bookshelf", "crate"], 2.0),
-    "kitchen": (["fridge", "stove", "counter", "counter", "table", "chair", "chair", "barrel"], 2.6),
-    "bathroom": (["bathtub", "crate", "wardrobe"], 2.0),
-    "library": (["bookshelf", "bookshelf", "bookshelf", "round_table", "chair", "piano"], 2.2),
-    "hall": (["chair", "bookshelf", "table", "round_table", "piano"], 0.9),
-    "office": (["table", "chair", "chair", "bookshelf", "wardrobe"], 2.0),
-    "shop": (["counter", "counter", "bookshelf", "bookshelf", "bookshelf", "crate", "fridge"], 2.2),
-    "storage": (["crate", "crate", "barrel", "barrel", "bookshelf", "wardrobe"], 2.6),
-    "garage": (["car", "crate", "barrel", "barrel", "counter"], 1.2),
-    "barn": (["hay_bale", "hay_bale", "hay_bale", "hay_bale", "crate", "crate", "barrel"], 1.6),
-    "chapel": (["pew", "pew", "pew", "pew", "table"], 1.8),
-    "farmyard": (["hay_bale", "hay_bale", "barrel", "crate"], 0.25),
-    "garden": (["round_table", "chair", "barrel"], 0.12),
+    "living": (["sofa_l", "sofa_u", "armchair", "armchair", "round_table", "hex_table", "bookshelf", "tv_stand",
+                "chair", "piano", "plant_pot", "drum_kit"], 2.0),
+    "dining": (["table", "oval_table", "chair", "chair", "chair", "chair", "corner_cabinet", "bookshelf",
+                "wardrobe", "plant_pot"], 2.2),
+    "bedroom": (["bed", "wardrobe", "armchair", "corner_cabinet", "desk_l", "bookshelf", "chair", "plant_pot"], 2.0),
+    "kitchen": (["fridge", "stove", "counter", "counter", "table", "chair", "chair", "corner_cabinet",
+                 "washing_machine", "barrel"], 2.6),
+    "bathroom": (["bathtub", "washing_machine", "corner_cabinet", "plant_pot", "crate"], 2.0),
+    "library": (["bookshelf", "bookshelf", "bookshelf", "desk_l", "armchair", "round_table", "corner_cabinet",
+                 "piano"], 2.2),
+    "hall": (["armchair", "bookshelf", "table", "hex_table", "round_table", "plant_pot", "piano"], 0.9),
+    "office": (["desk_l", "table", "chair", "chair", "bookshelf", "metal_shelf", "safe", "plant_pot"], 2.0),
+    "shop": (["counter", "counter", "metal_shelf", "metal_shelf", "bookshelf", "crate", "fridge", "safe"], 2.2),
+    "storage": (["crate", "crate", "barrel", "metal_shelf", "metal_shelf", "safe", "wardrobe", "log_pile"], 2.6),
+    "garage": (["car", "metal_shelf", "crate", "barrel", "washing_machine", "drum_kit", "counter"], 1.2),
+    "barn": (["hay_bale", "hay_bale", "hay_bale", "log_pile", "tractor", "crate", "barrel"], 1.6),
+    "chapel": (["pew", "pew", "pew", "pew", "coffin", "coffin", "altar"], 1.8),
+    "farmyard": (["hay_bale", "hay_bale", "log_pile", "barrel", "crate", "tractor"], 0.25),
+    "garden": (["round_table", "chair", "plant_pot", "plant_pot", "barrel"], 0.12),
     "street": (["dumpster", "barrel", "crate"], 0.06),
 }
 DOOR_CLEARANCE = 110.0             # aucun meuble posé à moins de ça d'une porte au début d'une manche
@@ -807,7 +833,8 @@ class World:
                 touched += 1
                 if kind == "prop":
                     pr = self.props[eid]
-                    pr.body.apply_impulse_at_world_point((ax * HIT_IMPULSE * MASS_SCALE, ay * HIT_IMPULSE * MASS_SCALE), info.point)
+                    imp = HIT_IMPULSE * MASS_SCALE * (ZOMBIE_PUSH if p.role == ZOMBIE else 1.0)
+                    pr.body.apply_impulse_at_world_point((ax * imp, ay * imp), info.point)
                     if p.role == ZOMBIE:       # seuls les zombies abîment les barricades
                         self._damage_prop(pr)
                 elif eid in self.players:
