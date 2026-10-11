@@ -30,6 +30,8 @@ from pymunk import ShapeFilter
 from .maps import MapDef, get_map
 
 TICK_RATE = 30
+# À incrémenter à chaque changement du protocole : un client d'une autre version se recharge tout seul.
+PROTOCOL_VERSION = 3
 SUBSTEPS = 2                       # pas de physique par tick (60 Hz)
 
 # --- Monde (les cartes elles-mêmes sont dans maps.py) ----------------------
@@ -46,6 +48,13 @@ SLOW_TIME = 1.5
 INFECT_DIST = 2 * PLAYER_R + 2
 INFECT_STUN = 1.0                  # le nouveau zombie est figé un instant
 KNOCKBACK_DECAY = 6.0
+
+# --- Bots ------------------------------------------------------------------
+NAV_CELL = 40.0
+NAV_MARGIN = PLAYER_R + 10         # une case de navigation est « libre » si un joueur y tient avec de la marge
+FLOW_REFRESH = 0.25                # s entre deux recalculs de la carte des distances vers les humains
+FLOW_LOOKAHEAD = 8                 # cases suivies le long de la pente pour couper les virages (si la voie est libre)
+BOT_REPLAN = (0.1, 0.2)            # s entre deux choix de cap d'un bot (aléatoire : on étale les calculs entre bots)
 
 # --- Frappe (tout le monde) ------------------------------------------------
 HIT_COOLDOWN = 0.45
@@ -107,7 +116,7 @@ class NavGrid:
     NEIGH: ClassVar[list[tuple[int, int, float]]] = [(1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0),
              (1, 1, 1.414), (1, -1, 1.414), (-1, 1, 1.414), (-1, -1, 1.414)]
 
-    def __init__(self, walls, w: float, h: float, cell: float = 40.0, margin: float = PLAYER_R + 4) -> None:
+    def __init__(self, walls, w: float, h: float, cell: float = NAV_CELL, margin: float = NAV_MARGIN) -> None:
         self.cell = cell
         self.cols, self.rows = int(w // cell), int(h // cell)
         self.blocked: set[tuple[int, int]] = set()
@@ -137,6 +146,47 @@ class NavGrid:
             if free:
                 return min(free, key=lambda n: (n[0] - c[0]) ** 2 + (n[1] - c[1]) ** 2)
         return c
+
+    def _steps(self, cur: tuple[int, int]):
+        """Cases voisines franchissables (pas de coupe d'angle entre deux cases bloquées)."""
+        for dx, dy, step in self.NEIGH:
+            nb = (cur[0] + dx, cur[1] + dy)
+            if not (0 <= nb[0] < self.cols and 0 <= nb[1] < self.rows) or nb in self.blocked:
+                continue
+            if dx and dy and ((cur[0] + dx, cur[1]) in self.blocked or (cur[0], cur[1] + dy) in self.blocked):
+                continue
+            yield nb, step
+
+    def distance_field(self, sources: list[tuple[float, float]]) -> dict[tuple[int, int], float]:
+        """Distance (en cases, par les couloirs) de chaque case à la source la plus proche (Dijkstra multi-sources)."""
+        dist: dict[tuple[int, int], float] = {}
+        heap = []
+        for x, y in sources:
+            c = self.nearest_free(self.cell_of(x, y))
+            if dist.get(c, 1e18) > 0:
+                dist[c] = 0.0
+                heap.append((0.0, c))
+        heapq.heapify(heap)
+        while heap:
+            d, cur = heapq.heappop(heap)
+            if d > dist[cur]:
+                continue
+            for nb, step in self._steps(cur):
+                nd = d + step
+                if nd < dist.get(nb, 1e18):
+                    dist[nb] = nd
+                    heapq.heappush(heap, (nd, nb))
+        return dist
+
+    def downhill(self, c: tuple[int, int], field: dict[tuple[int, int], float]) -> tuple[int, int] | None:
+        """Case voisine la plus proche d'une source, ou None si on est déjà au fond (ou hors de portée)."""
+        here = field.get(c)
+        if here is None:
+            return None
+        best = min(self._steps(c), key=lambda ns: field.get(ns[0], 1e18), default=None)
+        if best is None or field.get(best[0], 1e18) >= here:
+            return None
+        return best[0]
 
     def path(self, start: tuple[float, float], goal: tuple[float, float]) -> list[tuple[float, float]]:
         s, g = self.cell_of(*start), self.nearest_free(self.cell_of(*goal))
@@ -222,6 +272,9 @@ class BotBrain:
     last_pos: tuple[float, float] = (0.0, 0.0)
     wander: tuple[float, float] | None = None
     wander_t: float = 0.0
+    careful_until: float = 0.0       # coincé contre un mur : on suit la pente case par case un moment
+    wp: tuple[float, float] | None = None   # cap courant (None = foncer droit sur l'humain visé)
+    replan_at: float = 0.0
 
 
 @dataclass(eq=False)
@@ -279,6 +332,8 @@ class World:
         self._dirty_props: list[list] = []
         self._dirty_hp: dict[int, int] = {}       # id meuble -> PV en % (0 = cassé), à envoyer
         self._bot_n = 0
+        self._flow: dict[tuple[int, int], float] = {}
+        self._flow_at = -1e9
         self.map: MapDef = get_map(self.cfg.map)
         self.walls, self.doors = self.map.walls, self.map.doors
         self._build_static()
@@ -688,8 +743,47 @@ class World:
         return True
 
     # -------------------------------------------------------------------- bots
-    def _los(self, a: tuple[float, float], b: tuple[float, float]) -> bool:
-        return self.space.segment_query_first(a, b, PLAYER_R * 0.7, WALL_ONLY) is None
+    def _los(self, a: tuple[float, float], b: tuple[float, float], radius: float = PLAYER_R * 0.7) -> bool:
+        """Aucun mur entre a et b pour un objet de ce rayon (balle : fin ; corps entier : PLAYER_R)."""
+        return self.space.segment_query_first(a, b, radius, WALL_ONLY) is None
+
+    def _body_clear(self, a: tuple[float, float], b: tuple[float, float]) -> bool:
+        """Un joueur peut-il glisser en ligne droite de a à b sans accrocher un mur ? On échantillonne le trajet :
+        la requête « segment épais » de pymunk rate les murs dont le point de départ est déjà au contact."""
+        n = max(1, int(math.hypot(b[0] - a[0], b[1] - a[1]) // 15))
+        for i in range(1, n + 1):
+            k = i / n
+            pt = (a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k)
+            if self.space.point_query_nearest(pt, PLAYER_R + 2, WALL_ONLY) is not None:
+                return False
+        return True
+
+    def _humans_flow(self) -> dict[tuple[int, int], float]:
+        """Carte des distances vers l'humain le plus proche, partagée par tous les zombies, rafraîchie 4 fois/s."""
+        if self.now - self._flow_at >= FLOW_REFRESH:
+            self._flow = self.nav.distance_field([(h.x, h.y) for h in self.humans()])
+            self._flow_at = self.now
+        return self._flow
+
+    def _zombie_waypoint(self, p: Player) -> tuple[float, float] | None:
+        """Prochain point à viser : on descend la pente vers l'humain le plus proche (par les couloirs),
+        et on vise la case la plus lointaine encore atteignable en ligne droite pour tout le corps."""
+        field = self._humans_flow()
+        nav = self.nav
+        c = nav.nearest_free(nav.cell_of(p.x, p.y))
+        lookahead = 1 if self.now < p.bot.careful_until else FLOW_LOOKAHEAD
+        best = None
+        for _ in range(lookahead):
+            nxt = nav.downhill(c, field)
+            if nxt is None:
+                break
+            c = nxt
+            pt = nav.center(c)
+            if best is None or self._body_clear((p.x, p.y), pt):
+                best = pt
+            else:
+                break
+        return best
 
     def _bot_think(self, p: Player, dt: float) -> None:
         b = p.bot
@@ -704,23 +798,22 @@ class World:
                 return
             t = min(targets, key=lambda h: (h.x - p.x) ** 2 + (h.y - p.y) ** 2)
             goal = (t.x, t.y)
-            if self._los(pos, goal):
-                wp = goal
-            else:
-                b.repath_t -= dt
-                if b.repath_t <= 0:            # même sans chemin trouvé : jamais plus d'un calcul par 0,5 s
-                    b.path, b.repath_t = self.nav.path(pos, goal), 0.5
-                while b.path and math.hypot(b.path[0][0] - p.x, b.path[0][1] - p.y) < 28:
-                    b.path.pop(0)
-                wp = b.path[0] if b.path else goal
+            if self.now >= b.replan_at:
+                b.replan_at = self.now + self.rng.uniform(*BOT_REPLAN)
+                if math.hypot(t.x - p.x, t.y - p.y) < 300 and self._body_clear(pos, goal):
+                    b.wp = None                # en vue et tout proche : on fonce droit dessus
+                else:
+                    b.wp = self._zombie_waypoint(p) or goal
+            wp = goal if b.wp is None else b.wp
             vx, vy = wp[0] - p.x, wp[1] - p.y
             n = math.hypot(vx, vy) or 1.0
             p.dx, p.dy = vx / n, vy / n
             p.aim = math.atan2(vy, vx)
             b.check_t += dt          # coincé (meuble, barricade) ? on frappe
             if b.check_t >= 0.4:
-                if math.hypot(p.x - b.last_pos[0], p.y - b.last_pos[1]) < 12:
-                    self.hit(p)
+                stuck = math.hypot(p.x - b.last_pos[0], p.y - b.last_pos[1]) < 12
+                if stuck and self.hit(p) and self.events[-1]["n"] == 0:
+                    b.careful_until = self.now + 1.0     # rien à frapper : c'est un mur, on décroche
                 b.last_pos, b.check_t = pos, 0.0
         else:
             zs = [z for z in self.zombies() if self.now >= z.respawn_until]
@@ -767,7 +860,7 @@ class World:
 
     def static_info(self) -> dict:
         return {
-            "map": self.map.name, "w": self.map.w, "h": self.map.h,
+            "v": PROTOCOL_VERSION, "map": self.map.name, "w": self.map.w, "h": self.map.h,
             "rooms": [list(r) for r in self.map.rooms],
             "walls": [[round(v, 1) for v in w] for w in self.walls],
             "props": [[pr.id, pr.kind, pr.w, pr.h] for pr in self.props.values()],

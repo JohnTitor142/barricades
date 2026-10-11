@@ -6,6 +6,7 @@ import pytest
 from app.game import (
     BULLET_DAMAGE,
     CAT_ZOMBIE,
+    FLOW_REFRESH,
     HIT_COOLDOWN,
     HUMAN,
     INFECT_DIST,
@@ -93,7 +94,7 @@ def test_unknown_map_is_refused():
 
 def test_zombie_bot_crosses_the_long_map():
     """Sur l'entrepôt, un bot zombie part de sa salle (à gauche) et rejoint un humain dans la salle finale."""
-    w = World(Settings(map="entrepot", fill_to=0), seed=3)
+    w = World(Settings(map="entrepot", fill_to=0, intermission_seconds=999), seed=3)   # pas de manche : rôles figés
     for pr in list(w.props.values()):          # sans meubles : on teste la navigation, pas la casse
         w.space.remove(pr.body, pr.shape)
     w.props.clear()
@@ -502,19 +503,70 @@ def test_path_reaches_a_player_wedged_in_a_wall_corner():
     assert w.nav.path((1300, 300), (832, 831))
 
 
-def test_bot_does_not_repath_every_tick_when_target_is_unreachable(monkeypatch):
-    w = empty_world()
+def bare_world(name):
+    w = World(Settings(map=name, intermission_seconds=999), seed=7)
+    for pr in list(w.props.values()):
+        w.space.remove(pr.body, pr.shape)
+    w.props.clear()
+    return w
+
+
+def reached(z, h):
+    return math.hypot(z.x - h.x, z.y - h.y) < 2 * PLAYER_R + 6
+
+
+def chase(w, z, h, seconds):
+    """Hors manche (entracte) il n'y a pas d'infection : on regarde si le zombie arrive au contact."""
+    for _ in range(int(seconds / DT)):
+        w.step(DT)
+        if reached(z, h):
+            return True
+    return False
+
+
+@pytest.mark.parametrize(("name", "target"), [("manoir", (400, 400)), ("entrepot", (3050, 600))])
+def test_zombie_bot_does_not_get_stuck_on_door_frames(name, target):
+    """Cas qui bloquaient : angle de porte du manoir, bout du couloir central de l'entrepôt."""
+    w = bare_world(name)
     h = w.add_player("H")
     z = w.add_player("Z", bot=True)
     w._set_role(z, ZOMBIE)
-    w._teleport(z, (1300, 300))
-    w._teleport(h, (2000, 1200))
+    zx0, zy0, zx1, zy1 = w.map.rooms[w.map.zombie_room]
+    w._teleport(z, ((zx0 + zx1) / 2, (zy0 + zy1) / 2))
+    w._teleport(h, target)
     h.frozen_until = 1e9
+    assert chase(w, z, h, 30)
+
+
+def test_zombie_bot_targets_the_nearest_human_by_corridors_not_as_the_crow_flies():
+    """Entrepôt : A est juste derrière le mur (proche à vol d'oiseau, loin par les couloirs), B est l'inverse."""
+    w = bare_world("entrepot")
+    a = w.add_player("A")
+    b = w.add_player("B")
+    z = w.add_player("Z", bot=True)
+    w._set_role(z, ZOMBIE)
+    w._teleport(z, (1650, 200))     # pièce du haut en cul-de-sac (seule sortie : porte en x=1300)
+    w._teleport(a, (1650, 600))     # couloir central, 400 px sous le zombie mais ~1500 px par les portes
+    w._teleport(b, (800, 300))      # pièce voisine, ~850 px à vol d'oiseau et à peu près autant à pied
+    a.frozen_until = b.frozen_until = 1e9
+    for _ in range(int(20 / DT)):
+        w.step(DT)
+        if reached(z, a) or reached(z, b):
+            break
+    assert reached(z, b) and not reached(z, a)
+
+
+def test_distance_field_is_shared_and_refreshed_at_most_4_times_per_second(monkeypatch):
+    w = bare_world("manoir")
+    w.add_player("H")
+    for i in range(6):
+        z = w.add_player(f"Z{i}", bot=True)
+        w._set_role(z, ZOMBIE)
     calls = []
-    monkeypatch.setattr(w.nav, "path", lambda a, b: calls.append(1) or [])
-    monkeypatch.setattr(w, "_los", lambda a, b: False)
+    real = w.nav.distance_field
+    monkeypatch.setattr(w.nav, "distance_field", lambda src: calls.append(1) or real(src))
     run(w, 2)
-    assert len(calls) <= 5                              # 2 s / 0,5 s (+1 au démarrage)
+    assert 0 < len(calls) <= 2 / FLOW_REFRESH + 1
 
 
 def test_bots_fill_and_leave():
