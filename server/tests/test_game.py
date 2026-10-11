@@ -1,5 +1,7 @@
 import math
 
+import pytest
+
 from app.game import (
     CAT_ZOMBIE,
     HUMAN,
@@ -10,6 +12,7 @@ from app.game import (
     Settings,
     World,
 )
+from app.maps import MAPS
 
 DT = 1 / 30
 
@@ -61,6 +64,42 @@ def test_player_speed_without_obstacle():
     w.set_input(p.id, 1, 0, 0)
     run(w, 1)
     assert 150 < p.x - 100 < 220
+
+
+@pytest.mark.parametrize("name", list(MAPS))
+def test_every_map_is_connected_and_furnished(name):
+    """Depuis la salle des zombies, on atteint toutes les pièces ; aucune porte n'est bouchée au départ."""
+    w = World(Settings(map=name), seed=7)
+    assert len(w.props) >= 70
+    zx0, zy0, zx1, zy1 = w.map.rooms[w.map.zombie_room]
+    start = ((zx0 + zx1) / 2, (zy0 + zy1) / 2)
+    for x0, y0, x1, y1 in w.map.rooms:
+        assert w.nav.path(start, ((x0 + x1) / 2, (y0 + y1) / 2)), (x0, y0)
+    for dx, dy in w.doors:
+        assert w._free(dx, dy, PLAYER_R + 4), (dx, dy)
+
+
+def test_unknown_map_is_refused():
+    with pytest.raises(ValueError):
+        World(Settings(map="atlantide"))
+
+
+def test_zombie_bot_crosses_the_long_map():
+    """Sur l'entrepôt, un bot zombie part de sa salle (à gauche) et rejoint un humain dans la salle finale."""
+    w = World(Settings(map="entrepot", fill_to=0), seed=3)
+    for pr in list(w.props.values()):          # sans meubles : on teste la navigation, pas la casse
+        w.space.remove(pr.body, pr.shape)
+    w.props.clear()
+    h = w.add_player("H")
+    z = w.add_player("Z", bot=True)
+    w._set_role(z, ZOMBIE)
+    w._teleport(z, (300, 600))
+    w._teleport(h, (3800, 600))
+    for _ in range(int(40 / DT)):
+        w.step(DT)
+        if math.hypot(z.x - h.x, z.y - h.y) < 80:
+            break
+    assert math.hypot(z.x - h.x, z.y - h.y) < 80
 
 
 # --------------------------------------------------------- physique / frappe

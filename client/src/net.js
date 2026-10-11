@@ -63,6 +63,7 @@ export class Net {
     this.ready = false;
     this.world = { w: 2400, h: 1600 };
     this.walls = [];
+    this.rooms = [];
     this.propInfo = new Map(); // id -> {kind, w, h}
     this.props = new Map();    // id -> Track
     this.players = new Map();  // id -> {tr, role, flags}
@@ -106,6 +107,7 @@ export class Net {
     this.id = m.id;
     this.world = { w: m.w, h: m.h };
     this.walls = m.walls;
+    this.rooms = m.rooms ?? [];
     this.cfg = m.cfg;
     for (const [id, kind, w, h] of m.props) {
       this.propInfo.set(id, { kind, w, h });

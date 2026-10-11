@@ -24,12 +24,12 @@ from typing import ClassVar
 import pymunk
 from pymunk import ShapeFilter
 
+from .maps import MapDef, get_map
+
 TICK_RATE = 30
 SUBSTEPS = 2                       # pas de physique par tick (60 Hz)
 
-# --- Monde ---------------------------------------------------------------
-WORLD_W, WORLD_H = 2400.0, 1600.0
-WALL_T = 30.0
+# --- Monde (les cartes elles-mêmes sont dans maps.py) ----------------------
 GROUND_DAMPING = 0.05              # fraction de vitesse conservée après 1 s (frottement au sol)
 
 # --- Joueurs -------------------------------------------------------------
@@ -81,49 +81,12 @@ PROP_KINDS: dict[str, tuple[float, float, float]] = {
     "wardrobe": (80, 46, 60),
 }
 ROOM_PROPS = ["chair"] * 5 + ["crate"] * 3 + ["table"] * 2 + ["sofa", "bed"] + ["wardrobe"] * 2
-
-# Pièces : 3 colonnes x 2 lignes de 800 x 800.
-COLS, ROWS = [0, 800, 1600, 2400], [0, 800, 1600]
-ROOMS = [(COLS[c], ROWS[r], COLS[c + 1], ROWS[r + 1]) for r in range(2) for c in range(3)]
-ZOMBIE_ROOM = 2
-VERTICAL_WALLS = {800: [(300, 420), (1100, 1220)], 1600: [(500, 620), (1000, 1120)]}
-HORIZONTAL_WALLS = {800: [(300, 420), (1000, 1120), (1900, 2020)]}
+ROOM_PROPS_AREA = 800 * 800        # ROOM_PROPS meuble une pièce de cette surface ; au prorata pour les autres
+DOOR_CLEARANCE = 150.0             # aucun meuble posé à moins de ça d'une porte au début d'une manche
 
 
 def clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
-
-
-def _segments(length: float, gaps: list[tuple[float, float]]) -> list[tuple[float, float]]:
-    out, cur = [], 0.0
-    for a, b in sorted(gaps):
-        if a > cur:
-            out.append((cur, a))
-        cur = b
-    if cur < length:
-        out.append((cur, length))
-    return out
-
-
-def build_walls() -> tuple[list[tuple[float, float, float, float]], list[tuple[float, float]]]:
-    """Retourne (murs [(cx, cy, w, h)], centres des portes [(x, y)])."""
-    t = WALL_T
-    walls = [
-        (WORLD_W / 2, -t / 2, WORLD_W + 2 * t, t),
-        (WORLD_W / 2, WORLD_H + t / 2, WORLD_W + 2 * t, t),
-        (-t / 2, WORLD_H / 2, t, WORLD_H),
-        (WORLD_W + t / 2, WORLD_H / 2, t, WORLD_H),
-    ]
-    doors: list[tuple[float, float]] = []
-    for x, gaps in VERTICAL_WALLS.items():
-        for a, b in _segments(WORLD_H, gaps):
-            walls.append((x, (a + b) / 2, t, b - a))
-        doors += [(x, (a + b) / 2) for a, b in gaps]
-    for y, gaps in HORIZONTAL_WALLS.items():
-        for a, b in _segments(WORLD_W, gaps):
-            walls.append(((a + b) / 2, y, b - a, t))
-        doors += [((a + b) / 2, y) for a, b in gaps]
-    return walls, doors
 
 
 # --------------------------------------------------------------- navigation
@@ -133,9 +96,9 @@ class NavGrid:
     NEIGH: ClassVar[list[tuple[int, int, float]]] = [(1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0),
              (1, 1, 1.414), (1, -1, 1.414), (-1, 1, 1.414), (-1, -1, 1.414)]
 
-    def __init__(self, walls, cell: float = 40.0, margin: float = PLAYER_R + 4) -> None:
+    def __init__(self, walls, w: float, h: float, cell: float = 40.0, margin: float = PLAYER_R + 4) -> None:
         self.cell = cell
-        self.cols, self.rows = int(WORLD_W // cell), int(WORLD_H // cell)
+        self.cols, self.rows = int(w // cell), int(h // cell)
         self.blocked: set[tuple[int, int]] = set()
         for i in range(self.cols):
             for j in range(self.rows):
@@ -205,6 +168,7 @@ class Settings:
     min_players: int = 2
     max_players: int = 24
     fill_to: int = 0          # complète avec des bots jusqu'à N joueurs (0 = aucun)
+    map: str = "manoir"       # voir maps.MAPS
 
 
 @dataclass(eq=False)
@@ -281,10 +245,11 @@ class World:
         self.roster_dirty = True
         self._dirty_props: list[list] = []
         self._bot_n = 0
-        self.walls, self.doors = build_walls()
+        self.map: MapDef = get_map(self.cfg.map)
+        self.walls, self.doors = self.map.walls, self.map.doors
         self._build_static()
         self._build_props(random.Random(seed))
-        self.nav = NavGrid(self.walls)
+        self.nav = NavGrid(self.walls, self.map.w, self.map.h)
 
     # ------------------------------------------------------------ construction
     def _build_static(self) -> None:
@@ -298,16 +263,22 @@ class World:
 
     def _build_props(self, rng: random.Random) -> None:
         placed: list[tuple[float, float, float]] = []
-        for x0, y0, x1, y1 in ROOMS:
-            for kind in ROOM_PROPS:
+        for i, (x0, y0, x1, y1) in enumerate(self.map.rooms):
+            n = round(len(ROOM_PROPS) * (x1 - x0) * (y1 - y0) / ROOM_PROPS_AREA)
+            if i == self.map.zombie_room and self.map.name != "manoir":
+                n //= 3                    # la salle des zombies n'a pas besoin d'être meublée
+            kinds = ROOM_PROPS if n >= len(ROOM_PROPS) else rng.sample(ROOM_PROPS, n)
+            for kind in kinds:
                 w, h, _mass = PROP_KINDS[kind]
                 rad = math.hypot(w, h) / 2
                 for _ in range(60):
                     x = rng.uniform(x0 + 70 + rad, x1 - 70 - rad)
                     y = rng.uniform(y0 + 70 + rad, y1 - 70 - rad)
-                    if any(math.hypot(x - dx, y - dy) < 150 for dx, dy in self.doors):
+                    if any(math.hypot(x - dx, y - dy) < DOOR_CLEARANCE for dx, dy in self.doors):
                         continue
                     if any(math.hypot(x - px, y - py) < rad + pr + 8 for px, py, pr in placed):
+                        continue
+                    if not self._free(x, y, rad):          # piliers
                         continue
                     break
                 else:
@@ -378,9 +349,9 @@ class World:
                    bot=BotBrain() if bot else None, ctrl=ctrl, pivot=pivot)
         if self.phase == "play":
             self._set_role(p, ZOMBIE)
-            body.position = self._spawn_point([ZOMBIE_ROOM])
+            body.position = self._spawn_point([self.map.zombie_room])
         else:
-            body.position = self._spawn_point([i for i in range(len(ROOMS)) if i != ZOMBIE_ROOM])
+            body.position = self._spawn_point(self._human_rooms())
         ctrl.position = body.position
         self.space.add(body, shape, ctrl, pivot)
         self._owner[shape] = ("player", pid)
@@ -442,16 +413,19 @@ class World:
         taken = taken or []
         x = y = 0.0
         for _ in range(80):
-            x0, y0, x1, y1 = ROOMS[self.rng.choice(rooms)]
+            x0, y0, x1, y1 = self.map.rooms[self.rng.choice(rooms)]
             x = self.rng.uniform(x0 + 80, x1 - 80)
             y = self.rng.uniform(y0 + 80, y1 - 80)
             if self._free(x, y, PLAYER_R + 8) and all(math.hypot(x - tx, y - ty) > 60 for tx, ty in taken):
                 break
         return x, y
 
+    def _human_rooms(self) -> list[int]:
+        return [i for i in range(len(self.map.rooms)) if i != self.map.zombie_room]
+
     def _respawn_all_as_humans(self) -> None:
         taken: list[tuple[float, float]] = []
-        rooms = [i for i in range(len(ROOMS)) if i != ZOMBIE_ROOM]
+        rooms = self._human_rooms()
         for p in self.players.values():
             self._set_role(p, HUMAN)
             pos = self._spawn_point(rooms, taken)
@@ -488,7 +462,7 @@ class World:
 
     def _promote_zero(self, p: Player, first: bool = False) -> None:
         self._set_role(p, ZOMBIE)
-        self._teleport(p, self._spawn_point([ZOMBIE_ROOM]))
+        self._teleport(p, self._spawn_point([self.map.zombie_room]))
         if first:
             p.frozen_until = self.freeze_until = self.now + self.cfg.freeze_seconds
         self.events.append({"k": "zero", "id": p.id})
@@ -692,8 +666,8 @@ class World:
             else:
                 b.wander_t -= dt
                 if b.wander is None or b.wander_t <= 0 or math.hypot(b.wander[0] - p.x, b.wander[1] - p.y) < 30:
-                    b.wander = (clamp(p.x + self.rng.uniform(-300, 300), 40, WORLD_W - 40),
-                                clamp(p.y + self.rng.uniform(-300, 300), 40, WORLD_H - 40))
+                    b.wander = (clamp(p.x + self.rng.uniform(-300, 300), 40, self.map.w - 40),
+                                clamp(p.y + self.rng.uniform(-300, 300), 40, self.map.h - 40))
                     b.wander_t = self.rng.uniform(2, 5)
                 vx, vy = b.wander[0] - p.x, b.wander[1] - p.y
                 n = math.hypot(vx, vy) or 1.0
@@ -718,7 +692,8 @@ class World:
 
     def static_info(self) -> dict:
         return {
-            "w": WORLD_W, "h": WORLD_H,
+            "map": self.map.name, "w": self.map.w, "h": self.map.h,
+            "rooms": [list(r) for r in self.map.rooms],
             "walls": [[round(v, 1) for v in w] for w in self.walls],
             "props": [[pr.id, pr.kind, pr.w, pr.h] for pr in self.props.values()],
             "pos": self.props_full(),

@@ -98,9 +98,9 @@ export class GameScene extends Phaser.Scene {
     this.shotSplats = 0;
     const f = this.floor;
     f.clear();
-    ROOM_TINTS.forEach((c, i) => {
-      f.fillStyle(c, 1);
-      f.fillRect((i % 3) * (w / 3), Math.floor(i / 3) * (h / 2), w / 3, h / 2);
+    net.rooms.forEach(([x0, y0, x1, y1], i) => {
+      f.fillStyle(ROOM_TINTS[i % ROOM_TINTS.length], 1);
+      f.fillRect(x0, y0, x1 - x0, y1 - y0);
     });
     f.lineStyle(1, 0x000000, 0.35);          // lattes de parquet / carrelage
     for (let x = 0; x <= w; x += 80) f.lineBetween(x, 0, x, h);
