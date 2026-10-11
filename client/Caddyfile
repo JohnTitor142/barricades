@@ -12,6 +12,12 @@
 	}
 
 	handle {
+		# index.html toujours revérifié (sinon un vieux client peut rester en cache après une mise à jour) ;
+		# les fichiers de /assets ont un nom qui change à chaque build : cache long sans risque.
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		@pages not path /assets/*
+		header @pages Cache-Control "no-cache"
 		root * /srv
 		try_files {path} /index.html
 		file_server

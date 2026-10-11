@@ -4,7 +4,7 @@ import time
 from fastapi.testclient import TestClient
 
 from app import main
-from app.game import Settings, World
+from app.game import PROTOCOL_VERSION, Settings, World
 
 
 def recv_until(ws, pred, limit=300):
@@ -39,7 +39,7 @@ def test_welcome_contains_map_and_state_follows():
         assert w["t"] == "welcome" and len(w["walls"]) >= 10 and len(w["props"]) >= 70
         assert len(w["pos"]) == len(w["props"]) and w["names"][str(w["id"])] == "Alice"
         assert len(w["ps"]) == len(w["props"]) and all(pct == 100 for _, pct in w["ps"])
-        assert w["map"] and len(w["rooms"]) >= 6
+        assert w["map"] and len(w["rooms"]) >= 6 and w["v"] == PROTOCOL_VERSION
         s = recv_until(ws, lambda m: m["t"] == "s")
         assert s["ph"] == "wait" and "me" in s and any(p[0] == w["id"] for p in s["p"])
 

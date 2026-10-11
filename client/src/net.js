@@ -5,6 +5,7 @@
 // garde un court historique, et un meuble immobile reste simplement à sa dernière position.
 
 export const INTERP_DELAY = 100; // ms
+export const PROTOCOL = 3;        // doit valoir PROTOCOL_VERSION du serveur (game.py)
 const TELEPORT = 250;            // au-delà, pas de lissage (réapparition, changement de manche)
 
 export function lerpAngle(a, b, k) {
@@ -94,6 +95,13 @@ export class Net {
       ws.onmessage = (e) => {
         const m = JSON.parse(e.data);
         if (m.t === 'welcome') {
+          if (m.v !== PROTOCOL) {         // page ouverte avant une mise à jour du serveur
+            this.ws = null;
+            ws.onclose = null;
+            ws.close();
+            reject(new Error('VERSION'));
+            return;
+          }
           this._welcome(m);
           resolve();
         } else if (m.t === 's') {

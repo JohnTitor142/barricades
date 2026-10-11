@@ -58,7 +58,26 @@ window.addEventListener('keydown', (e) => {
   sound.toggleMusic();
 });
 
-net.onClose = () => showMenu('Connexion perdue avec le serveur.');
+// Après une mise à jour, le serveur redémarre : on attend qu'il réponde, puis on recharge la page
+// pour récupérer le nouveau client (sinon on jouerait avec l'ancien code contre le nouveau serveur).
+let reloading = false;
+async function reloadWhenServerIsBack(message) {
+  showMenu(message);
+  if (reloading) return;
+  reloading = true;
+  playBtn.disabled = true;
+  for (let i = 0; i < 90; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    try {
+      const r = await fetch('/health', { cache: 'no-store' });
+      if (r.ok) { location.reload(); return; }
+    } catch { /* pas encore revenu */ }
+  }
+  reloading = false;
+  showMenu('Le serveur ne répond plus. Rechargez la page plus tard.');
+}
+
+net.onClose = () => reloadWhenServerIsBack('Connexion perdue (mise à jour du serveur ?) : rechargement automatique…');
 
 $('menu-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -72,6 +91,7 @@ $('menu-form').addEventListener('submit', async (e) => {
     menu.hidden = true;
     $('hud').hidden = false;
   } catch (err) {
-    showMenu(err.message);
+    if (err.message === 'VERSION') reloadWhenServerIsBack('Nouvelle version du jeu : rechargement…');
+    else showMenu(err.message);
   }
 });
