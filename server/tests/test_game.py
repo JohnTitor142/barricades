@@ -6,9 +6,11 @@ import pytest
 
 import app.game as game_mod
 from app.game import (
+    ALPHA_R,
     BULLET_DAMAGE,
     CAT_WALL,
     CAT_ZOMBIE,
+    DASH_COOLDOWN,
     FALLOFF_MIN,
     FLOW_REFRESH,
     HIT_COOLDOWN,
@@ -20,10 +22,13 @@ from app.game import (
     PICKUP_RESPAWN,
     PLAYER_R,
     PROP_KINDS,
+    RAGE_COOLDOWN,
+    RAGE_TIME,
     RESPAWN_TIME,
     WEAPONS,
     ZOMBIE,
     ZOMBIE_HP,
+    ZOMBIE_SPEED,
     NavGrid,
     Settings,
     World,
@@ -483,6 +488,76 @@ def test_zombie_hint_points_to_the_door_not_through_the_wall():
     assert abs(a - to_door) < abs(a - straight)
     assert w.zombie_hint(h) is None and w.me(h.id)[3] is None
     assert w.me(z.id)[2] == "pistol" and isinstance(w.me(z.id)[3], float)
+
+
+def test_zombie_dash_leaps_forward_then_recharges_in_10_s():
+    w = empty_world(intermission_seconds=999)
+    z, h = w.add_player("Z"), w.add_player("H")
+    w._set_role(z, ZOMBIE)
+    w._teleport(z, (500, 400))
+    w.set_input(z.id, 1, 0, 0)
+    run(w, 0.5)
+    x0 = z.x
+    assert w.dash(z)
+    run(w, 0.5)
+    dashed = z.x - x0
+    assert dashed > ZOMBIE_SPEED * 0.5 + 100          # ~150 px de plus qu'en marchant
+    assert not w.dash(z) and not w.dash(h)            # en recharge ; un humain ne dashe pas
+    run(w, DASH_COOLDOWN)
+    assert w.dash(z)
+    assert any(e["k"] == "dash" for e in w.events)
+
+
+def test_patient_zero_is_a_bigger_faster_alpha_and_stays_alpha_after_dying():
+    w = empty_world(intermission_seconds=0.5, freeze_seconds=0)
+    a, b = start_round(w, 2)
+    alpha, human = (a, b) if a.role == ZOMBIE else (b, a)
+    assert alpha.alpha and not human.alpha
+    assert alpha.shape.radius == ALPHA_R > PLAYER_R
+    assert w.snapshot()["p"][[p.id for p in w.players.values()].index(alpha.id)][5] & 8
+    w._teleport(alpha, (300, 300))
+    w._teleport(human, (1300, 300))
+    human.frozen_until = 1e9
+    w.set_input(alpha.id, 1, 0, 0)
+    run(w, 0.5)                                       # lancé (le démarrage coûte quelques px)
+    x0 = alpha.x
+    run(w, 1)
+    assert alpha.x - x0 > ZOMBIE_SPEED * 1.08         # plus rapide qu'un zombie normal
+    alpha.hp = 1
+    w._damage_zombie(alpha, 5, human)                 # abattu : réapparaît, toujours alpha
+    assert alpha.alpha and alpha.respawn_until > w.now
+
+
+def test_alpha_infects_from_further_away_because_it_is_bigger():
+    w = empty_world(intermission_seconds=0.5, freeze_seconds=0)
+    z, h = w.add_player("Z"), w.add_player("H")
+    run(w, 1)
+    w._set_role(z, ZOMBIE)
+    w._set_role(h, HUMAN)
+    w._set_alpha(z, True)
+    w._teleport(z, (500, 400))
+    w._teleport(h, (500 + INFECT_DIST + 4, 400))      # hors de portée d'un zombie normal
+    z.frozen_until = 0
+    w._infection()
+    assert h.role == ZOMBIE
+
+
+def test_alpha_rage_ignores_bullet_slow_for_5_s_and_recharges_in_30_s(no_spread):
+    w, h, (z,) = zombie_line()
+    assert not w.rage(z)                              # pas alpha : pas de sort
+    w._set_alpha(z, True)
+    assert w.rage(z)
+    w.shoot(h)
+    assert z.slow_until <= w.now and z.hp < ZOMBIE_HP # touché, mais pas ralenti
+    assert not w.rage(z)                              # en recharge
+    run(w, RAGE_TIME + 0.2)
+    h.shot_cd = h.reload_t = 0.0
+    h.ammo = 6
+    w._teleport(z, (h.x + 200, h.y))
+    w.shoot(h)
+    assert z.slow_until > w.now                       # sort terminé : ralenti de nouveau
+    run(w, RAGE_COOLDOWN)
+    assert w.rage(z)
 
 
 def test_melee_from_a_human_hurts_zombies_but_not_humans():

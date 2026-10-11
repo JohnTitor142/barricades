@@ -235,6 +235,26 @@ class Sound {
     }
   }
 
+  /** Bond d'un zombie : souffle rapide. */
+  dash(x, y) {
+    const dest = this.out(x, y, 0.7);
+    if (!dest) return;
+    const t = this.ctx.currentTime;
+    const f = this.noiseBurst(dest, t, 0.25, 'bandpass', 300, 0.6, 0.8);
+    f.Q.value = 1.5;
+    f.frequency.exponentialRampToValueAtTime(2400, t + 0.2);
+  }
+
+  /** Sort de l'alpha : rugissement grave. */
+  rage(x, y) {
+    const dest = this.out(x, y, 1);
+    if (!dest) return;
+    const t = this.ctx.currentTime;
+    this.boom(dest, t, 90, 55, 0.6, 0.8, 'sawtooth');
+    this.boom(dest, t + 0.05, 140, 70, 0.5, 0.4, 'sawtooth');
+    this.noiseBurst(dest, t, 0.5, 'lowpass', 700, 0.5, 0.6);
+  }
+
   /** Arme ramassée (entendue seulement par soi). */
   pickup() {
     const dest = this.out(this.listener.x, this.listener.y, 0.6);

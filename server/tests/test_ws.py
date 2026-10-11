@@ -44,7 +44,7 @@ def test_welcome_contains_map_and_state_follows():
         assert "wp" in w                                        # armes au sol dès l'arrivée
         s = recv_until(ws, lambda m: m["t"] == "s")
         assert s["ph"] == "wait" and "me" in s and any(p[0] == w["id"] for p in s["p"])
-        assert len(s["me"]) == 4                                # [munitions, recharge, arme, cap vers l'humain]
+        assert len(s["me"]) == 6     # [munitions, recharge, arme, cap vers l'humain, recharge dash, recharge sort]
 
 
 def test_input_moves_player():

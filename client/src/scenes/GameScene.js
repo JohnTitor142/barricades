@@ -63,8 +63,10 @@ export class GameScene extends Phaser.Scene {
     this.input.keyboard.disableGlobalCapture(); // ne pas bloquer la saisie du nom
     this.keys = this.input.keyboard.addKeys('Z,Q,S,D,W,A,UP,DOWN,LEFT,RIGHT');
     this.input.keyboard.on('keydown-SPACE', () => net.sendAct('hit'));
+    this.input.keyboard.on('keydown-E', () => net.sendAct('rage'));         // sort de l'alpha
     this.input.on('pointerdown', (p) => {
-      if (p.rightButtonDown()) net.sendAct('hit');
+      // Clic droit : dash pour un zombie (son clic gauche frappe déjà), frappe pour un humain.
+      if (p.rightButtonDown()) net.sendAct(net.players.get(net.id)?.role === HUMAN ? 'hit' : 'dash');
       else this.firing = true;
     });
     this.input.on('pointerup', () => { this.firing = false; });
@@ -202,6 +204,12 @@ export class GameScene extends Phaser.Scene {
     } else if (ev.k === 'hit') {
       sound.hit(ev.x, ev.y, ev.n > 0);
       this.addFx({ k: 'swing', ev, until: now + 150 });
+    } else if (ev.k === 'dash') {
+      sound.dash(ev.x, ev.y);
+      this.addFx({ k: 'dash', ev, until: now + 300 });
+    } else if (ev.k === 'rage') {
+      const p = net.players.get(ev.id)?.tr.sample(performance.now() - INTERP_DELAY, true);
+      if (p) sound.rage(p.x, p.y);
     } else if (ev.k === 'pickup') {
       if (ev.id === net.id) sound.pickup();
     } else if (ev.k === 'break') {
@@ -341,7 +349,7 @@ export class GameScene extends Phaser.Scene {
 
   drawPlayers(rt) {
     const g = this.pg;
-    const R = net.cfg.player_r;
+    const R0 = net.cfg.player_r;
     g.clear();
     const seen = new Set();
     const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 250);
@@ -363,13 +371,16 @@ export class GameScene extends Phaser.Scene {
       }
       this.label(`w${id}`, WEAPON_LABEL[kind] ?? kind, x, y - 22, '#ffd27a', seen);
     }
+    const R = R0;
     for (const [id, e] of net.players) {
       const s = e.tr.sample(rt, true);
       if (!s) continue;
       const zombie = e.role !== HUMAN;
+      const alpha = zombie && (e.flags & 8);
+      const R = alpha ? R0 * 1.35 : R0;
       const ax = Math.cos(s.a);
       const ay = Math.sin(s.a);
-      const col = zombie ? ZOMBIE_BODY : Phaser.Display.Color.HSLToColor((id * 0.137) % 1, 0.35, 0.78).color;
+      const col = alpha ? 0x5e8a40 : zombie ? ZOMBIE_BODY : Phaser.Display.Color.HSLToColor((id * 0.137) % 1, 0.35, 0.78).color;
 
       if (e.flags & 4) {                                 // abattu : réapparaît bientôt (intouchable)
         g.fillStyle(ZOMBIE_BODY, 0.22);
@@ -384,8 +395,12 @@ export class GameScene extends Phaser.Scene {
       g.fillCircle(s.x + 3, s.y + 4, R);
       g.fillStyle(col, 1);
       g.fillCircle(s.x, s.y, R);
-      g.lineStyle(3, zombie ? 0x2c4a1f : 0x4d4030, 1);
+      g.lineStyle(alpha ? 4 : 3, alpha ? 0x5a1010 : zombie ? 0x2c4a1f : 0x4d4030, 1);
       g.strokeCircle(s.x, s.y, R);
+      if (e.flags & 16) {                                // sort de l'alpha : halo rouge pulsant
+        g.lineStyle(4, 0xd23a3a, 0.45 + 0.35 * pulse);
+        g.strokeCircle(s.x, s.y, R + 7 + 3 * pulse);
+      }
 
       if (zombie) {
         g.fillStyle(0x5f8a45, 1);                       // bras tendus
@@ -455,8 +470,15 @@ export class GameScene extends Phaser.Scene {
     g.clear();
     this.fx = this.fx.filter((f) => f.until > now);
     for (const f of this.fx) {
-      const life = (f.until - now) / (f.k === 'tracer' ? 90 : 150);
-      if (f.k === 'tracer') {
+      const life = (f.until - now) / (f.k === 'tracer' ? 90 : f.k === 'dash' ? 300 : 150);
+      if (f.k === 'dash') {                      // traînée derrière le point de départ du bond
+        const bx = Math.cos(f.ev.a);
+        const by = Math.sin(f.ev.a);
+        for (let i = 0; i < 4; i++) {
+          g.fillStyle(0x9bc46a, 0.18 * life * (4 - i) / 4);
+          g.fillCircle(f.ev.x - bx * i * 14, f.ev.y - by * i * 14, 14 - i * 2);
+        }
+      } else if (f.k === 'tracer') {
         g.lineStyle(2, 0xfff1a8, life);
         g.lineBetween(f.ev.x1, f.ev.y1, f.ev.x2, f.ev.y2);
         if (f.ev.h) {
@@ -498,6 +520,13 @@ export class GameScene extends Phaser.Scene {
     this.minimap.draw(minimapDots(players, net.id));
   }
 
+  abilityText(me, isAlpha) {
+    const cd = (s) => (s > 0 ? `${Math.ceil(s)} s` : 'PRÊT');
+    let text = `DASH ${cd(me[4])}`;
+    if (isAlpha) text += ` · ANTI-RALENTI (E) ${cd(me[5])}`;
+    return text;
+  }
+
   ammoText([ammo, reloading, weapon]) {
     const name = WEAPON_LABEL[weapon] ?? weapon;
     if (reloading) return `${name} · RECHARGEMENT`;
@@ -520,9 +549,10 @@ export class GameScene extends Phaser.Scene {
     h.timer.classList.toggle('urgent', ph === 'play' && left < 30);
 
     const zombie = meEntry?.role !== HUMAN;
-    h.role.textContent = zombie ? 'ZOMBIE' : 'HUMAIN';
+    const isAlpha = zombie && (meEntry?.flags & 8);
+    h.role.textContent = isAlpha ? 'ZOMBIE ALPHA' : zombie ? 'ZOMBIE' : 'HUMAIN';
     h.role.className = zombie ? 'zombie' : 'human';
-    h.ammo.textContent = zombie ? '' : this.ammoText(me);
+    h.ammo.textContent = zombie ? this.abilityText(me, isAlpha) : this.ammoText(me);
 
     let text = '';
     let cls = '';

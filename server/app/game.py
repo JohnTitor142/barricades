@@ -14,6 +14,8 @@ Règles
 - Les humains ont un pistolet : un tir pousse les objets et ralentit les zombies. Des armes (MP9, fusil à
   pompe) traînent au sol et se ramassent en marchant dessus. Les tirs sont imprécis (dispersion aléatoire qui
   augmente quand on enchaîne) et perdent en efficacité avec la distance.
+- Zombies : dash (clic droit, recharge 10 s). Le patient zéro est l'ALPHA : plus gros, plus rapide, et un sort
+  « anti-ralenti » (touche E) qui annule le ralentissement des balles 5 s (recharge 30 s).
 - Les zombies ont beaucoup de PV : balles et coups des humains finissent par les abattre ;
   ils réapparaissent alors dans leur salle après quelques secondes (invulnérables pendant l'attente).
 - Le serveur fait autorité sur tout (positions, tirs, infection).
@@ -34,7 +36,7 @@ from .maps import MapDef, Obstacle, Wall, get_map
 
 TICK_RATE = 30
 # À incrémenter à chaque changement du protocole : un client d'une autre version se recharge tout seul.
-PROTOCOL_VERSION = 6
+PROTOCOL_VERSION = 7
 SUBSTEPS = 2                       # pas de physique par tick (60 Hz)
 
 # --- Monde (les cartes elles-mêmes sont dans maps.py) ----------------------
@@ -51,6 +53,14 @@ SLOW_TIME = 1.5
 INFECT_DIST = 2 * PLAYER_R + 2
 INFECT_STUN = 1.0                  # le nouveau zombie est figé un instant
 KNOCKBACK_DECAY = 6.0
+
+# --- Capacités des zombies ---------------------------------------------------
+DASH_SPEED = 900.0                 # vitesse donnée d'un coup, qui retombe comme un recul : ~150 px parcourus
+DASH_COOLDOWN = 10.0
+ALPHA_R = PLAYER_R * 1.35          # le patient zéro (« alpha ») est plus gros...
+ALPHA_SPEED_BONUS = 1.12           # ... et plus rapide
+RAGE_TIME = 5.0                    # sort de l'alpha : les balles ne le ralentissent plus pendant ce temps
+RAGE_COOLDOWN = 30.0
 
 # --- Bots ------------------------------------------------------------------
 NAV_CELL = 40.0
@@ -364,9 +374,17 @@ class Player:
     frozen_until: float = 0.0
     hp: int = ZOMBIE_HP                # n'a de sens que pour un zombie
     respawn_until: float = 0.0
+    alpha: bool = False
+    dash_cd: float = 0.0
+    rage_cd: float = 0.0
+    rage_until: float = 0.0
     bot: BotBrain | None = None
     ctrl: pymunk.Body | None = None
     pivot: pymunk.PivotJoint | None = None
+
+    @property
+    def radius(self) -> float:
+        return ALPHA_R if self.alpha else PLAYER_R
 
     @property
     def x(self) -> float:
@@ -593,11 +611,22 @@ class World:
             self.hit(p)
         elif kind == "shoot":
             self.shoot(p)
+        elif kind == "dash":
+            self.dash(p)
+        elif kind == "rage":
+            self.rage(p)
 
     def _set_role(self, p: Player, role: int) -> None:
         p.role = role
         p.hp = ZOMBIE_HP
         p.shape.filter = ShapeFilter(categories=CAT_ZOMBIE if role == ZOMBIE else CAT_HUMAN)
+        if role == HUMAN:
+            self._set_alpha(p, False)
+
+    def _set_alpha(self, p: Player, on: bool) -> None:
+        p.alpha = on
+        p.shape.unsafe_set_radius(ALPHA_R if on else PLAYER_R)
+        p.dash_cd = p.rage_cd = p.rage_until = 0.0
 
     # ------------------------------------------------------------------ spawns
     def _free(self, x: float, y: float, r: float) -> bool:
@@ -659,6 +688,7 @@ class World:
 
     def _promote_zero(self, p: Player, first: bool = False) -> None:
         self._set_role(p, ZOMBIE)
+        self._set_alpha(p, True)
         self._teleport(p, self._spawn_point(self.map.zombie_areas))
         if first:
             p.frozen_until = self.freeze_until = self.now + self.cfg.freeze_seconds
@@ -702,6 +732,8 @@ class World:
         for p in self.players.values():
             p.hit_cd = max(0.0, p.hit_cd - dt)
             p.shot_cd = max(0.0, p.shot_cd - dt)
+            p.dash_cd = max(0.0, p.dash_cd - dt)
+            p.rage_cd = max(0.0, p.rage_cd - dt)
             p.bloom = max(0.0, p.bloom - BLOOM_DECAY * dt)
             if p.reload_t > 0:
                 p.reload_t -= dt
@@ -732,7 +764,9 @@ class World:
             vx = vy = 0.0
         else:
             speed = ZOMBIE_SPEED if p.role == ZOMBIE else HUMAN_SPEED
-            if self.now < p.slow_until:
+            if p.alpha:
+                speed *= ALPHA_SPEED_BONUS
+            if self.now < p.slow_until and self.now >= p.rage_until:
                 speed *= SLOW_FACTOR
             vx, vy = p.dx * speed, p.dy * speed
         p.ctrl.velocity = (vx + p.kbx, vy + p.kby)
@@ -741,7 +775,7 @@ class World:
         zombies = [z for z in self.zombies() if self.now >= z.frozen_until]
         for h in self.humans():
             for z in zombies:
-                if math.hypot(z.x - h.x, z.y - h.y) <= INFECT_DIST:
+                if math.hypot(z.x - h.x, z.y - h.y) <= INFECT_DIST + z.radius - PLAYER_R:   # alpha plus gros
                     self._infect(h, z)
                     break
         if not self.humans():
@@ -784,6 +818,32 @@ class World:
                             "y": round(p.y + ay * 28, 1), "a": round(p.aim, 2), "n": touched})
         return True
 
+    def dash(self, p: Player) -> bool:
+        """Zombie : bond vers l'avant (direction de déplacement, sinon de visée)."""
+        if p.role != ZOMBIE or p.dash_cd > 0 or self.now < p.frozen_until:
+            return False
+        n = math.hypot(p.dx, p.dy)
+        ux, uy = (p.dx / n, p.dy / n) if n > 0.1 else (math.cos(p.aim), math.sin(p.aim))
+        # L'élan va directement au corps (le « moteur » du joueur, à force limitée, l'absorberait sinon),
+        # et au recul pour que ce moteur ne le freine pas : il retombe ensuite comme un recul.
+        p.body.velocity = (p.body.velocity.x + ux * DASH_SPEED, p.body.velocity.y + uy * DASH_SPEED)
+        p.kbx += ux * DASH_SPEED
+        p.kby += uy * DASH_SPEED
+        p.dash_cd = DASH_COOLDOWN
+        self.events.append({"k": "dash", "id": p.id, "x": round(p.x, 1), "y": round(p.y, 1),
+                            "a": round(math.atan2(uy, ux), 2)})
+        return True
+
+    def rage(self, p: Player) -> bool:
+        """Alpha : insensible au ralentissement des balles pendant RAGE_TIME."""
+        if p.role != ZOMBIE or not p.alpha or p.rage_cd > 0 or self.now < p.frozen_until:
+            return False
+        p.rage_until = self.now + RAGE_TIME
+        p.rage_cd = RAGE_COOLDOWN
+        p.slow_until = 0.0
+        self.events.append({"k": "rage", "id": p.id})
+        return True
+
     def _damage_zombie(self, z: Player, dmg: int, by: Player) -> None:
         if self.now < z.frozen_until:          # figé (réveil, infection, réapparition) = invulnérable
             return
@@ -793,7 +853,7 @@ class World:
         self.events.append({"k": "kill", "id": z.id, "by": by.id, "x": round(z.x, 1), "y": round(z.y, 1)})
         z.hp = ZOMBIE_HP
         z.respawn_until = z.frozen_until = self.now + RESPAWN_TIME
-        z.slow_until = 0.0
+        z.slow_until = z.rage_until = 0.0
         z.kbx = z.kby = 0.0
         self._teleport(z, self._spawn_point(self.map.zombie_areas))
 
@@ -843,7 +903,8 @@ class World:
                 hit_kind = "prop"
             elif owner and owner[0] == "player" and owner[1] in self.players:
                 z = self.players[owner[1]]
-                z.slow_until = self.now + SLOW_TIME * k
+                if self.now >= z.rage_until:                 # sort de l'alpha : pas de ralentissement
+                    z.slow_until = self.now + SLOW_TIME * k
                 z.kbx += ax * SHOT_KNOCKBACK * k
                 z.kby += ay * SHOT_KNOCKBACK * k
                 self._damage_zombie(z, max(1, round(wpn.damage * k)), p)
@@ -963,6 +1024,10 @@ class World:
             n = math.hypot(vx, vy) or 1.0
             p.dx, p.dy = vx / n, vy / n
             p.aim = math.atan2(vy, vx)
+            if b.wp is None and p.dash_cd == 0 and 110 < math.hypot(t.x - p.x, t.y - p.y) < 320:
+                self.dash(p)                   # proie en vue, à bonne distance : on bondit
+            if p.alpha and self.now < p.slow_until and p.rage_cd == 0:
+                self.rage(p)                   # alpha ralenti par les balles : sort
             b.check_t += dt          # coincé (meuble, barricade) ? on frappe
             if b.check_t >= 0.4:
                 stuck = math.hypot(p.x - b.last_pos[0], p.y - b.last_pos[1]) < 12
@@ -1032,19 +1097,22 @@ class World:
         }
 
     def me(self, pid: int) -> list:
-        """Infos propres à un joueur : [munitions, rechargement 0/1, arme, cap vers l'humain le plus proche ou null]."""
+        """Infos propres à un joueur : [munitions, rechargement 0/1, arme, cap vers l'humain le plus proche ou null,
+        recharge du dash (s), recharge du sort de l'alpha (s, -1 si pas alpha)]."""
         p = self.players.get(pid)
         if p is None:
-            return [0, 0, "pistol", None]
+            return [0, 0, "pistol", None, 0, -1]
         hint = self.zombie_hint(p)
-        return [p.ammo, 1 if p.reload_t > 0 else 0, p.weapon, None if hint is None else round(hint, 2)]
+        return [p.ammo, 1 if p.reload_t > 0 else 0, p.weapon, None if hint is None else round(hint, 2),
+                round(p.dash_cd, 1), round(p.rage_cd, 1) if p.alpha else -1]
 
     def snapshot(self) -> dict:
         """État global (identique pour tous les clients) ; consomme événements et props modifiés."""
         players = []
         for p in self.players.values():
-            flags = ((1 if self.now < p.slow_until else 0) | (2 if self.now < p.frozen_until else 0)
-                     | (4 if self.now < p.respawn_until else 0))
+            flags = ((1 if self.now < p.slow_until and self.now >= p.rage_until else 0)
+                     | (2 if self.now < p.frozen_until else 0) | (4 if self.now < p.respawn_until else 0)
+                     | (8 if p.alpha else 0) | (16 if self.now < p.rage_until else 0))
             hp = round(100 * p.hp / ZOMBIE_HP) if p.role == ZOMBIE else 100
             players.append([p.id, round(p.x, 1), round(p.y, 1), round(p.aim, 2), p.role, flags, hp])
         fz = self.freeze_until - self.now if self.phase == "play" else 0.0
