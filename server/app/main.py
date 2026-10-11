@@ -88,7 +88,8 @@ app = FastAPI(lifespan=lifespan)
 @app.get("/health")
 def health() -> dict:
     return {"ok": True, "players": world.real_count, "total": len(world.players),
-            "phase": world.phase, "tick": world.tick}
+            "phase": world.phase, "tick": world.tick,
+            "commit": os.environ.get("SOURCE_COMMIT", "")}  # fourni par Coolify : la CI vérifie la version en ligne
 
 
 @app.websocket("/ws")

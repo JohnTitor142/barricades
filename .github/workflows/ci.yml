@@ -1,0 +1,92 @@
+# CI/CD : tests à chaque push / pull request ; sur main, si TOUT est vert, redéploiement via l'API Coolify
+# puis attente que le site en ligne serve bien ce commit (/health renvoie le commit déployé).
+#
+# Réglages dans GitHub → Settings → Secrets and variables → Actions :
+#   - secret   COOLIFY_TOKEN : jeton API Coolify (permission « deploy »)
+#   - variable COOLIFY_URL   : adresse de Coolify, ex. https://coolify.212.227.181.202.sslip.io
+# Sans eux, les tests tournent quand même et l'étape de déploiement est simplement ignorée.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  COOLIFY_APP_UUID: x13ca9t7ijnk6neojsqi71j3
+  APP_URL: https://barricade.212.227.181.202.sslip.io
+
+jobs:
+  server:
+    name: Serveur (pytest + ruff)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: server/requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: python -m pytest -q
+
+  client:
+    name: Client (tests + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  deploy:
+    name: Déploiement (Coolify)
+    needs: [server, client]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+      COOLIFY_URL: ${{ vars.COOLIFY_URL }}
+    steps:
+      - name: Demander le redéploiement à Coolify
+        run: |
+          if [ -z "$COOLIFY_TOKEN" ] || [ -z "$COOLIFY_URL" ]; then
+            echo "::notice::COOLIFY_TOKEN ou COOLIFY_URL absent : déploiement ignoré (tests OK)."
+            echo "SKIP=1" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          curl -fsS -G "$COOLIFY_URL/api/v1/deploy" \
+            --data-urlencode "uuid=$COOLIFY_APP_UUID" --data-urlencode "force=false" \
+            -H "Authorization: Bearer $COOLIFY_TOKEN"
+          echo
+
+      - name: Attendre que le site serve ce commit
+        if: env.SKIP != '1'
+        run: |
+          for i in $(seq 1 60); do          # 60 x 15 s = 15 min max (le build prend quelques minutes)
+            commit=$(curl -fsS --max-time 10 "$APP_URL/health" | jq -r '.commit // empty' || true)
+            if [ "$commit" = "$GITHUB_SHA" ]; then
+              echo "En ligne : $APP_URL (commit $commit)"
+              exit 0
+            fi
+            echo "[$i] en ligne : ${commit:-?} — attendu : $GITHUB_SHA"
+            sleep 15
+          done
+          echo "::error::Le site ne sert toujours pas $GITHUB_SHA après 15 min (voir les logs de déploiement Coolify)."
+          exit 1

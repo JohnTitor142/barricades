@@ -26,9 +26,11 @@ def join(ws, name):
     return json.loads(ws.receive_text())
 
 
-def test_health():
+def test_health(monkeypatch):
+    monkeypatch.setenv("SOURCE_COMMIT", "abc123")
     with fresh_client() as c:
-        assert c.get("/health").json()["ok"] is True
+        h = c.get("/health").json()
+        assert h["ok"] is True and h["commit"] == "abc123"
 
 
 def test_welcome_contains_map_and_state_follows():
